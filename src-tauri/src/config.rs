@@ -7,7 +7,7 @@ use serde_json::Value;
 
 use crate::models::{AgentConfig, GrantedFolder, PendingApproval, RecentAction};
 
-pub const FALLBACK_PROD_API_URL: &str = "http://localhost:8080";
+pub const FALLBACK_PROD_API_URL: &str = "https://api.247autoarmy.in/";
 pub const MAX_SEARCH_RESULTS: usize = 80;
 pub const MAX_TEXT_BYTES: usize = 256_000;
 pub const COMMAND_TIMEOUT_SECONDS: u64 = 60;
@@ -92,9 +92,11 @@ fn compact_value(v: Value) -> Value {
         Value::String(s) if s.len() > MAX_STR => {
             Value::String(format!("{}…(+{} chars)", &s[..MAX_STR], s.len() - MAX_STR))
         }
-        Value::Object(map) => {
-            Value::Object(map.into_iter().map(|(k, v)| (k, compact_value(v))).collect())
-        }
+        Value::Object(map) => Value::Object(
+            map.into_iter()
+                .map(|(k, v)| (k, compact_value(v)))
+                .collect(),
+        ),
         Value::Array(arr) => {
             let total = arr.len();
             let mut items: Vec<Value> = arr.into_iter().take(MAX_ARR).map(compact_value).collect();
@@ -133,7 +135,9 @@ pub fn add_recent(
 
 pub fn make_granted_folder(canonical: &std::path::Path) -> GrantedFolder {
     GrantedFolder {
-        label: canonical.file_name().map(|n| n.to_string_lossy().to_string()),
+        label: canonical
+            .file_name()
+            .map(|n| n.to_string_lossy().to_string()),
         path: canonical.to_string_lossy().to_string(),
         indexed_at: Some(Utc::now().to_rfc3339()),
     }
@@ -146,5 +150,10 @@ pub fn debug_log(scope: &str, event: &str, detail: impl AsRef<str>) {
 pub fn secret_fingerprint(value: &str) -> String {
     let mut hasher = Sha256::new();
     hasher.update(value.as_bytes());
-    hasher.finalize().iter().take(6).map(|b| format!("{b:02x}")).collect()
+    hasher
+        .finalize()
+        .iter()
+        .take(6)
+        .map(|b| format!("{b:02x}"))
+        .collect()
 }
