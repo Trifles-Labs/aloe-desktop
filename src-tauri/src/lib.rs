@@ -169,6 +169,7 @@ async fn remove_folder(state: State<'_, AppState>, path: String) -> Result<Agent
 
 #[tauri::command]
 async fn approve_command(
+    app: AppHandle,
     state: State<'_, AppState>,
     job_id: String,
     approved: bool,
@@ -193,7 +194,7 @@ async fn approve_command(
         kind: pending.job_kind.clone(),
         input: input_val.clone(),
     };
-    let result = dispatch_tool(&state, &config, &job).await;
+    let result = dispatch_tool(&app, &state, &config, &job).await;
     let (status, output, error) = match result {
         Ok(v) => ("completed", Some(v), None),
         Err(m) => ("failed", None, Some(m)),
@@ -248,6 +249,7 @@ pub fn run() {
 
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_notification::init())
         .manage(AppState {
             config: Mutex::new(initial_config),
             pending: Mutex::new(Vec::new()),

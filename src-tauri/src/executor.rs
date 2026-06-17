@@ -2,6 +2,7 @@ use chrono::Utc;
 use serde_json::{json, Value};
 use std::{process::Stdio, time::Duration};
 use tauri::{AppHandle, Emitter, Manager};
+use tauri_plugin_notification::NotificationExt;
 use tokio::process::Command;
 
 use crate::config::{add_recent, debug_log, save_config, AppState, COMMAND_TIMEOUT_SECONDS};
@@ -110,7 +111,7 @@ pub async fn execute_job(app: AppHandle, job: AgentJob) {
     }
 
     let input_snapshot = job.input.clone();
-    let result = dispatch_tool(&state, &config, &job).await;
+    let result = dispatch_tool(&app, &state, &config, &job).await;
     let (status, output, error) = outcome(result);
     post_result(&state, &config, &job.id, status, output.clone(), error.clone()).await;
     debug_log("job", "completed", format!("job_id={} kind={} status={status}", job.id, job.kind));
@@ -158,6 +159,7 @@ fn queue_for_approval(state: &tauri::State<AppState>, app: &AppHandle, job: Agen
 }
 
 pub async fn dispatch_tool(
+    app: &AppHandle,
     state: &tauri::State<'_, AppState>,
     config: &AgentConfig,
     job: &AgentJob,
@@ -186,6 +188,7 @@ pub async fn dispatch_tool(
         "open_local_url"         => open_local_url(&job.input).await,
         "capture_desktop_screenshot" => capture_desktop_screenshot().await,
         "get_editor_context"     => get_editor_context(config, &job.input).await,
+        "show_notification"      => show_notification(app, &job.input).await,
         _                        => Err(format!("Unknown job type: {}", job.kind)),
     }
 }
@@ -330,5 +333,23 @@ async fn get_editor_context(config: &AgentConfig, input: &Value) -> Result<Value
         "status": truncate_text(String::from_utf8_lossy(&output.stdout).to_string()),
         "stderr": truncate_text(String::from_utf8_lossy(&output.stderr).to_string()),
         "selectionSupport": "Install a companion editor extension to expose highlighted text and active selections.",
+    }))
+}
+
+async fn show_notification(app: &AppHandle, input: &Value) -> Result<Value, String> {
+    let title = input_string(input, "title")?;
+    let message = input_string(input, "message")?;
+
+    app.notification()
+        .builder()
+        .title(&title)
+        .body(&message)
+        .show()
+        .map_err(|e| e.to_string())?;
+
+    Ok(json!({
+        "title": title,
+        "message": message,
+        "shown": true,
     }))
 }
