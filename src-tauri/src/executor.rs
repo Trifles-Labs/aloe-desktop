@@ -227,7 +227,7 @@ $bounds = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds;
 $bitmap = New-Object System.Drawing.Bitmap $bounds.Width, $bounds.Height;
 $graphics = [System.Drawing.Graphics]::FromImage($bitmap);
 $graphics.CopyFromScreen($bounds.Location, [System.Drawing.Point]::Empty, $bounds.Size);
-$maxDimension = 1280;
+$maxDimension = 960;
 $largest = [Math]::Max($bounds.Width, $bounds.Height);
 $scale = if ($largest -gt $maxDimension) { $maxDimension / $largest } else { 1.0 };
 $targetWidth = [Math]::Max(1, [int][Math]::Round($bounds.Width * $scale));
