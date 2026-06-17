@@ -1,11 +1,12 @@
 use chrono::Utc;
 use reqwest::Client;
 use sha2::{Digest, Sha256};
-use std::{fs, path::PathBuf, sync::Mutex};
+use std::{collections::HashMap, fs, path::PathBuf, sync::Mutex};
 
 use serde_json::Value;
 
 use crate::models::{AgentConfig, GrantedFolder, PendingApproval, RecentAction};
+use crate::terminal::TerminalSession;
 
 pub const FALLBACK_PROD_API_URL: &str = "https://api.247autoarmy.in/";
 pub const MAX_SEARCH_RESULTS: usize = 80;
@@ -17,6 +18,7 @@ pub const SOCKET_RECONNECT_MAX_MS: u64 = 15_000;
 pub struct AppState {
     pub config: Mutex<AgentConfig>,
     pub pending: Mutex<Vec<PendingApproval>>,
+    pub terminals: Mutex<HashMap<String, TerminalSession>>,
     pub client: Client,
 }
 

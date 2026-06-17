@@ -4,9 +4,10 @@ mod fs;
 mod models;
 mod search;
 mod socket;
+mod terminal;
 
 use serde_json::json;
-use std::{fs as std_fs, sync::Mutex};
+use std::{collections::HashMap, fs as std_fs, sync::Mutex};
 use tauri::{AppHandle, Manager, State};
 use tauri_plugin_dialog::DialogExt;
 
@@ -14,8 +15,8 @@ use config::{
     add_recent, debug_log, load_config, make_granted_folder,
     normalize_setup_token, save_config, secret_fingerprint, AppState,
 };
-use executor::{post_result, run_command};
-use models::{AgentConfig, ErrorResponse, PendingApproval, RegisterResponse, SearchMatch};
+use executor::{dispatch_tool, post_result};
+use models::{AgentConfig, AgentJob, ErrorResponse, PendingApproval, RegisterResponse, SearchMatch};
 use search::{search_content as search_content_fn, search_files as search_files_fn};
 use socket::{clear_agent_credentials, sync_folders_with_config};
 
@@ -186,8 +187,13 @@ async fn approve_command(
         return Ok(());
     }
 
-    let input_val = json!({ "cwd": pending.cwd, "command": pending.command });
-    let result = run_command(config.clone(), input_val.clone()).await;
+    let input_val = pending.input.clone();
+    let job = AgentJob {
+        id: pending.job_id.clone(),
+        kind: pending.job_kind.clone(),
+        input: input_val.clone(),
+    };
+    let result = dispatch_tool(&state, &config, &job).await;
     let (status, output, error) = match result {
         Ok(v) => ("completed", Some(v), None),
         Err(m) => ("failed", None, Some(m)),
@@ -195,7 +201,7 @@ async fn approve_command(
     post_result(&state, &config, &pending.job_id, status, output.clone(), error.clone()).await;
     {
         let mut cfg = state.config.lock().expect("config mutex");
-        add_recent(&mut cfg, &pending.job_id, "run_command", status, error.as_deref().unwrap_or("Completed"), Some(input_val), output);
+        add_recent(&mut cfg, &pending.job_id, &pending.job_kind, status, error.as_deref().unwrap_or("Completed"), Some(input_val), output);
         let _ = save_config(&cfg);
     }
     Ok(())
@@ -245,6 +251,7 @@ pub fn run() {
         .manage(AppState {
             config: Mutex::new(initial_config),
             pending: Mutex::new(Vec::new()),
+            terminals: Mutex::new(HashMap::new()),
             client: reqwest::Client::new(),
         })
         .invoke_handler(tauri::generate_handler![

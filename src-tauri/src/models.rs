@@ -42,10 +42,12 @@ pub struct RecentAction {
 #[serde(rename_all = "camelCase")]
 pub struct PendingApproval {
     pub job_id: String,
+    pub job_kind: String,
     pub command: String,
     pub cwd: String,
     pub reason: String,
     pub requested_at: String,
+    pub input: Value,
 }
 
 #[derive(Debug, Deserialize)]
