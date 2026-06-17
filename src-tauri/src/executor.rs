@@ -227,13 +227,38 @@ $bounds = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds;
 $bitmap = New-Object System.Drawing.Bitmap $bounds.Width, $bounds.Height;
 $graphics = [System.Drawing.Graphics]::FromImage($bitmap);
 $graphics.CopyFromScreen($bounds.Location, [System.Drawing.Point]::Empty, $bounds.Size);
+$maxDimension = 1280;
+$largest = [Math]::Max($bounds.Width, $bounds.Height);
+$scale = if ($largest -gt $maxDimension) { $maxDimension / $largest } else { 1.0 };
+$targetWidth = [Math]::Max(1, [int][Math]::Round($bounds.Width * $scale));
+$targetHeight = [Math]::Max(1, [int][Math]::Round($bounds.Height * $scale));
+$finalBitmap = if ($scale -lt 1.0) {
+    $resized = New-Object System.Drawing.Bitmap $targetWidth, $targetHeight;
+    $resizeGraphics = [System.Drawing.Graphics]::FromImage($resized);
+    $resizeGraphics.InterpolationMode = [System.Drawing.Drawing2D.InterpolationMode]::HighQualityBicubic;
+    $resizeGraphics.DrawImage($bitmap, 0, 0, $targetWidth, $targetHeight);
+    $resizeGraphics.Dispose();
+    $resized;
+} else {
+    $bitmap;
+};
 $path = Join-Path $env:TEMP ("aloe-screenshot-" + [guid]::NewGuid().ToString() + ".png");
-$bitmap.Save($path, [System.Drawing.Imaging.ImageFormat]::Png);
+$finalBitmap.Save($path, [System.Drawing.Imaging.ImageFormat]::Png);
 $graphics.Dispose();
+if ($finalBitmap -ne $bitmap) { $finalBitmap.Dispose(); }
 $bitmap.Dispose();
 $bytes = [System.IO.File]::ReadAllBytes($path);
 [System.IO.File]::Delete($path);
-[Convert]::ToBase64String($bytes);
+@{
+    mimeType = "image/png";
+    base64 = [Convert]::ToBase64String($bytes);
+    width = $targetWidth;
+    height = $targetHeight;
+    originalWidth = $bounds.Width;
+    originalHeight = $bounds.Height;
+    downscaled = ($scale -lt 1.0);
+    maxDimension = $maxDimension;
+} | ConvertTo-Json -Compress;
 "#;
 
     let output = tokio::time::timeout(
@@ -257,12 +282,15 @@ $bytes = [System.IO.File]::ReadAllBytes($path);
         return Err(String::from_utf8_lossy(&output.stderr).trim().to_string());
     }
 
-    let base64 = String::from_utf8_lossy(&output.stdout).trim().to_string();
-    Ok(json!({
-        "mimeType": "image/png",
-        "base64": base64,
-        "note": "Primary display screenshot captured by Aloe Desktop.",
-    }))
+    let payload = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    let mut value: Value = serde_json::from_str(&payload).map_err(|e| e.to_string())?;
+    if let Some(object) = value.as_object_mut() {
+        object.insert(
+            "note".to_string(),
+            Value::String("Primary display screenshot captured by Aloe Desktop.".to_string()),
+        );
+    }
+    Ok(value)
 }
 
 async fn get_editor_context(config: &AgentConfig, input: &Value) -> Result<Value, String> {
