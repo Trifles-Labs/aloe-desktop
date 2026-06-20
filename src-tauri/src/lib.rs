@@ -1,7 +1,9 @@
 mod config;
+mod desktop;
 mod executor;
 mod fs;
 mod models;
+mod notifications;
 mod search;
 mod socket;
 mod terminal;
@@ -10,6 +12,7 @@ use serde_json::json;
 use std::{collections::HashMap, fs as std_fs, sync::Mutex};
 use tauri::{AppHandle, Manager, State};
 use tauri_plugin_dialog::DialogExt;
+use tauri_plugin_autostart::{MacosLauncher, ManagerExt};
 
 use config::{
     add_recent, debug_log, load_config, make_granted_folder,
@@ -32,21 +35,53 @@ fn get_pending_approvals(state: State<AppState>) -> Vec<PendingApproval> {
     state.pending.lock().expect("pending mutex").clone()
 }
 
+#[tauri::command]
+fn hide_main_window(app: AppHandle) {
+    desktop::hide_main_window(&app);
+}
+
+#[tauri::command]
+fn set_run_on_startup(app: AppHandle, state: State<AppState>, enabled: bool) -> Result<AgentConfig, String> {
+    if enabled {
+        app.autolaunch().enable().map_err(|error| error.to_string())?;
+    } else {
+        app.autolaunch().disable().map_err(|error| error.to_string())?;
+    }
+    let next = {
+        let mut config = state.config.lock().expect("config mutex");
+        config.run_on_startup = enabled;
+        save_config(&config)?;
+        config.clone()
+    };
+    Ok(next)
+}
+
+#[tauri::command]
+fn set_start_minimized(state: State<AppState>, enabled: bool) -> Result<AgentConfig, String> {
+    let mut config = state.config.lock().expect("config mutex");
+    config.start_minimized = enabled;
+    save_config(&config)?;
+    Ok(config.clone())
+}
+
 // ── Connection management ─────────────────────────────────────────────────────
 
 #[tauri::command]
-fn reset_agent_connection(state: State<AppState>) -> Result<AgentConfig, String> {
+fn reset_agent_connection(app: AppHandle, state: State<AppState>) -> Result<AgentConfig, String> {
     let mut config = state.config.lock().expect("config mutex");
     clear_agent_credentials(
         &mut config,
         "Connection reset. Paste a fresh setup token from Aloe Integrations.",
     );
     save_config(&config)?;
-    Ok(config.clone())
+    let result = config.clone();
+    drop(config);
+    desktop::refresh_tray_menu(&app);
+    Ok(result)
 }
 
 #[tauri::command]
-async fn register_agent(state: State<'_, AppState>, token: String) -> Result<AgentConfig, String> {
+async fn register_agent(app: AppHandle, state: State<'_, AppState>, token: String) -> Result<AgentConfig, String> {
     let config = state.config.lock().expect("config mutex").clone();
     let setup_token = normalize_setup_token(&token);
     if setup_token.is_empty() {
@@ -110,11 +145,16 @@ async fn register_agent(state: State<'_, AppState>, token: String) -> Result<Age
 
     let mut next = state.config.lock().expect("config mutex");
     next.agent_id = Some(registered.agent_id);
+    next.user_token = Some(registered.user_token.unwrap_or_else(|| registered.credential.clone()));
+    next.user_profile = registered.user;
     next.credential = Some(registered.credential);
     next.socket_status = "reconnecting".to_string();
     next.socket_error = None;
     save_config(&next)?;
-    Ok(next.clone())
+    let result = next.clone();
+    drop(next);
+    desktop::refresh_tray_menu(&app);
+    Ok(result)
 }
 
 // ── Settings ──────────────────────────────────────────────────────────────────
@@ -250,6 +290,7 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_notification::init())
+        .plugin(tauri_plugin_autostart::init(MacosLauncher::LaunchAgent, Some(vec!["--autostart"])))
         .manage(AppState {
             config: Mutex::new(initial_config),
             pending: Mutex::new(Vec::new()),
@@ -259,6 +300,9 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             get_config,
             get_pending_approvals,
+            hide_main_window,
+            set_run_on_startup,
+            set_start_minimized,
             reset_agent_connection,
             register_agent,
             set_always_allow_commands,
@@ -270,11 +314,30 @@ pub fn run() {
             search_files,
         ])
         .setup(|app| {
+            desktop::install_tray(app)?;
+            let launched_by_autostart = std::env::args().any(|arg| arg == "--autostart");
+            let preferences = app.state::<AppState>().config.lock().expect("config mutex").clone();
+            if preferences.run_on_startup {
+                let _ = app.autolaunch().enable();
+            } else {
+                let _ = app.autolaunch().disable();
+            }
+            if !(launched_by_autostart && preferences.start_minimized) {
+                desktop::show_main_window(app.handle());
+            }
             let handle = app.handle().clone();
             tauri::async_runtime::spawn(async move {
                 socket::socket_loop(handle).await;
             });
             Ok(())
+        })
+        .on_menu_event(|app, event| desktop::handle_menu_event(app, event.id().as_ref()))
+        .on_tray_icon_event(desktop::handle_tray_event)
+        .on_window_event(|window, event| {
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                api.prevent_close();
+                desktop::hide_main_window(window.app_handle());
+            }
         })
         .run(tauri::generate_context!())
         .expect("error while running Aloe Desktop");

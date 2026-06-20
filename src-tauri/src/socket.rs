@@ -26,6 +26,7 @@ pub fn set_socket_state(app: &AppHandle, status: &str, error: Option<String>) {
         config.socket_error = error;
         let _ = save_config(&config);
     }
+    crate::desktop::refresh_tray_menu(app);
     let _ = app.emit("agent://socket-status", ());
 }
 
@@ -33,6 +34,8 @@ pub fn clear_agent_credentials(config: &mut AgentConfig, reason: &str) {
     debug_log("config", "clear_credentials", format!("reason={reason}"));
     config.agent_id = None;
     config.credential = None;
+    config.user_token = None;
+    config.user_profile = None;
     config.socket_status = "disconnected".to_string();
     config.socket_error = Some(reason.to_string());
 }

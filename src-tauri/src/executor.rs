@@ -2,7 +2,6 @@ use chrono::Utc;
 use serde_json::{json, Value};
 use std::{process::Stdio, time::Duration};
 use tauri::{AppHandle, Emitter, Manager};
-use tauri_plugin_notification::NotificationExt;
 use tokio::process::Command;
 
 use crate::config::{add_recent, debug_log, save_config, AppState, COMMAND_TIMEOUT_SECONDS};
@@ -11,6 +10,7 @@ use crate::fs::{
     input_string, list_files, read_file, truncate_text, update_file, update_folder,
 };
 use crate::models::{AgentConfig, AgentJob, PendingApproval};
+use crate::notifications;
 use crate::search::search_codebase;
 use crate::terminal::{
     list_terminal_sessions, read_terminal_session, start_terminal_session, stop_terminal_session,
@@ -339,13 +339,7 @@ async fn get_editor_context(config: &AgentConfig, input: &Value) -> Result<Value
 async fn show_notification(app: &AppHandle, input: &Value) -> Result<Value, String> {
     let title = input_string(input, "title")?;
     let message = input_string(input, "message")?;
-
-    app.notification()
-        .builder()
-        .title(&title)
-        .body(&message)
-        .show()
-        .map_err(|e| e.to_string())?;
+    notifications::show_clickable(app, &title, &message)?;
 
     Ok(json!({
         "title": title,

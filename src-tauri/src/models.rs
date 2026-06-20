@@ -9,17 +9,30 @@ pub struct GrantedFolder {
     pub indexed_at: Option<String>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DesktopUserProfile {
+    pub id: String,
+    pub name: String,
+    pub email: String,
+    pub picture: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(default, rename_all = "camelCase")]
 pub struct AgentConfig {
     pub api_url: String,
     pub agent_id: Option<String>,
     pub credential: Option<String>,
+    pub user_token: Option<String>,
+    pub user_profile: Option<DesktopUserProfile>,
     pub device_name: String,
     pub platform: String,
     pub socket_status: String,
     pub socket_error: Option<String>,
     pub always_allow_commands: bool,
+    pub run_on_startup: bool,
+    pub start_minimized: bool,
     pub folders: Vec<GrantedFolder>,
     pub recent_actions: Vec<RecentAction>,
 }
@@ -55,6 +68,8 @@ pub struct PendingApproval {
 pub struct RegisterResponse {
     pub agent_id: String,
     pub credential: String,
+    pub user_token: Option<String>,
+    pub user: Option<DesktopUserProfile>,
 }
 
 #[derive(Debug, Deserialize)]

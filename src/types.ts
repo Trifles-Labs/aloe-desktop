@@ -20,11 +20,15 @@ export type AgentConfig = {
   apiUrl: string;
   agentId: string | null;
   credential: string | null;
+  userToken: string | null;
+  userProfile: { id: string; name: string; email: string; picture: string } | null;
   deviceName: string;
   platform: string;
   socketStatus: string;
   socketError: string | null;
   alwaysAllowCommands: boolean;
+  runOnStartup: boolean;
+  startMinimized: boolean;
   folders: GrantedFolder[];
   recentActions: RecentAction[];
 };
@@ -60,11 +64,15 @@ export const DEFAULT_CONFIG: AgentConfig = {
   apiUrl: "",
   agentId: null,
   credential: null,
+  userToken: null,
+  userProfile: null,
   deviceName: "Aloe Desktop",
   platform: "unknown",
   socketStatus: "disconnected",
   socketError: null,
   alwaysAllowCommands: false,
+  runOnStartup: false,
+  startMinimized: false,
   folders: [],
   recentActions: [],
 };

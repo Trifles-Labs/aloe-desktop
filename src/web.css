@@ -1,0 +1,7 @@
+@import "../../aloe-frontend/app/globals.css";
+
+@source "../../aloe-frontend/app";
+@source "../../aloe-frontend/components";
+@source "../../aloe-frontend/contexts";
+@source "../../aloe-frontend/lib";
+@source "./";

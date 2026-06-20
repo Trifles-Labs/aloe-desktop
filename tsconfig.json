@@ -14,7 +14,13 @@
     "resolveJsonModule": true,
     "isolatedModules": true,
     "noEmit": true,
-    "jsx": "react-jsx"
+    "jsx": "react-jsx",
+    "baseUrl": ".",
+    "paths": {
+      "@/*": ["../aloe-frontend/*"],
+      "next/link": ["src/shims/next-link.tsx"],
+      "next/navigation": ["src/shims/next-navigation.ts"]
+    }
   },
-  "include": ["src"]
+  "include": ["src", "../aloe-frontend/app/(app)", "../aloe-frontend/components", "../aloe-frontend/contexts", "../aloe-frontend/lib"]
 }

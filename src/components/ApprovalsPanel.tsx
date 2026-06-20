@@ -1,5 +1,5 @@
 import React from "react";
-import { Play, RefreshCw, X } from "lucide-react";
+import { CheckCircle2, Play, RefreshCw, ShieldCheck, X } from "lucide-react";
 import type { AgentConfig, PendingApproval } from "../types";
 
 type Props = {
@@ -12,51 +12,33 @@ type Props = {
 
 export function ApprovalsPanel({ config, pending, onRefresh, onApprove, onToggleAlwaysAllow }: Props) {
   return (
-    <div className="panel">
-      <div className="panel-header">
-        <h2>Command approvals</h2>
-        <button className="icon-button" onClick={onRefresh} title="Refresh">
-          <RefreshCw size={14} />
-        </button>
+    <section className="liquid-glass rounded-3xl p-5 sm:p-6">
+      <div className="flex items-center justify-between gap-4">
+        <div><p className="eyebrow">Safety</p><h2 className="mt-1 font-display text-xl font-semibold text-[#0b3026] dark:text-[#e8f0e0]">Command approvals</h2></div>
+        <button className="secondary-button min-h-0 px-3 py-2 text-xs" onClick={onRefresh}><RefreshCw className="h-3.5 w-3.5" />Refresh</button>
       </div>
 
-      <label className="toggle-row">
-        <input
-          type="checkbox"
-          checked={config.alwaysAllowCommands}
-          onChange={(e) => onToggleAlwaysAllow(e.target.checked)}
-        />
-        <span>
-          <strong>Always allow commands</strong>
-          <small>Run command requests inside granted folders without asking each time.</small>
-        </span>
+      <label className="mt-5 flex cursor-pointer items-start gap-3 rounded-2xl border border-[#d9e0d5] bg-white/40 p-4 dark:border-[#2a3a28] dark:bg-[#152118]/55">
+        <input className="mt-0.5 h-4 w-4 accent-[#6f8747]" type="checkbox" checked={config.alwaysAllowCommands} onChange={(event) => onToggleAlwaysAllow(event.target.checked)} />
+        <span><strong className="block text-sm text-[#0b3026] dark:text-[#e8f0e0]">Always allow commands</strong><small className="mt-1 block text-xs leading-5 text-[#6b786f] dark:text-[#78907e]">Run command requests inside granted folders without asking each time.</small></span>
       </label>
 
-      <div className="approval-list" style={{ marginTop: 12 }}>
-        {config.alwaysAllowCommands && pending.length === 0 && (
-          <p className="muted">Command requests will run automatically.</p>
-        )}
-        {!config.alwaysAllowCommands && pending.length === 0 && (
-          <p className="muted">No commands waiting for approval.</p>
-        )}
-        {pending.map((item) => (
-          <div className="approval-row" key={item.jobId}>
-            <div>
-              <p className="reason">{item.reason}</p>
-              <code>{item.command}</code>
-              <span>{item.cwd}</span>
-            </div>
-            <div className="actions">
-              <button className="primary" onClick={() => onApprove(item.jobId, true)}>
-                <Play size={13} /> Run
-              </button>
-              <button className="secondary" onClick={() => onApprove(item.jobId, false)}>
-                <X size={13} /> Deny
-              </button>
-            </div>
+      <div className="mt-4 space-y-3">
+        {pending.length === 0 ? (
+          <div className="rounded-2xl border border-dashed border-[#d9e0d5] p-6 text-center dark:border-[#2a3a28]">
+            {config.alwaysAllowCommands ? <ShieldCheck className="mx-auto h-7 w-7 text-[#6f8747] dark:text-[#8faa5f]" /> : <CheckCircle2 className="mx-auto h-7 w-7 text-[#6f8747] dark:text-[#8faa5f]" />}
+            <p className="mt-2 text-sm font-medium text-[#506257] dark:text-[#8aaa90]">{config.alwaysAllowCommands ? "Commands will run automatically." : "Nothing waiting for approval."}</p>
           </div>
+        ) : null}
+        {pending.map((item) => (
+          <article className="rounded-2xl border border-[#d9e0d5] bg-white/45 p-4 dark:border-[#2a3a28] dark:bg-[#152118]/55" key={item.jobId}>
+            <p className="text-sm font-semibold text-[#0b3026] dark:text-[#e8f0e0]">{item.reason}</p>
+            <code className="mt-3 block overflow-x-auto rounded-xl bg-[#edf2e8] px-3 py-2 text-xs text-[#0b3026] dark:bg-[#0e1a13] dark:text-[#cbd9c6]">{item.command}</code>
+            <p className="mt-2 truncate text-xs text-[#6b786f] dark:text-[#78907e]">{item.cwd}</p>
+            <div className="mt-4 flex gap-2"><button className="primary-button min-h-0 px-4 py-2 text-xs" onClick={() => onApprove(item.jobId, true)}><Play className="h-3.5 w-3.5" />Run</button><button className="secondary-button min-h-0 px-4 py-2 text-xs" onClick={() => onApprove(item.jobId, false)}><X className="h-3.5 w-3.5" />Deny</button></div>
+          </article>
         ))}
       </div>
-    </div>
+    </section>
   );
 }

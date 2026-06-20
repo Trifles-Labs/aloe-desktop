@@ -8,7 +8,8 @@ use serde_json::Value;
 use crate::models::{AgentConfig, GrantedFolder, PendingApproval, RecentAction};
 use crate::terminal::TerminalSession;
 
-pub const FALLBACK_PROD_API_URL: &str = "https://api.247autoarmy.in/";
+// pub const FALLBACK_PROD_API_URL: &str = "https://api.247autoarmy.in/";
+pub const FALLBACK_PROD_API_URL: &str = "http://localhost:8080/";
 pub const MAX_SEARCH_RESULTS: usize = 80;
 pub const MAX_TEXT_BYTES: usize = 256_000;
 pub const COMMAND_TIMEOUT_SECONDS: u64 = 60;
@@ -31,7 +32,12 @@ pub fn normalize_api_url(raw: &str) -> String {
 }
 
 pub fn default_api_url() -> String {
-    normalize_api_url(option_env!("ALOE_BACKEND_URL").unwrap_or(FALLBACK_PROD_API_URL))
+    let fallback = if cfg!(debug_assertions) {
+        "http://127.0.0.1:8080"
+    } else {
+        FALLBACK_PROD_API_URL
+    };
+    normalize_api_url(option_env!("ALOE_BACKEND_URL").unwrap_or(fallback))
 }
 
 pub fn normalize_setup_token(token: &str) -> String {
