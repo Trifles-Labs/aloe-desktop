@@ -8,8 +8,8 @@ use serde_json::Value;
 use crate::models::{AgentConfig, GrantedFolder, PendingApproval, RecentAction};
 use crate::terminal::TerminalSession;
 
-// pub const FALLBACK_PROD_API_URL: &str = "https://api.247autoarmy.in/";
-pub const FALLBACK_PROD_API_URL: &str = "http://localhost:8080/";
+pub const FALLBACK_PROD_API_URL: &str = "https://api.247autoarmy.in/";
+// pub const FALLBACK_PROD_API_URL: &str = "http://localhost:8080/";
 pub const MAX_SEARCH_RESULTS: usize = 80;
 pub const MAX_TEXT_BYTES: usize = 256_000;
 pub const COMMAND_TIMEOUT_SECONDS: u64 = 60;
