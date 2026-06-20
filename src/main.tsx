@@ -11,6 +11,7 @@ import { FoldersPanel } from "./components/FoldersPanel";
 import { ApprovalsPanel } from "./components/ApprovalsPanel";
 import { ActivityList } from "./components/ActivityList";
 import { DesktopTitleBar } from "./components/DesktopTitleBar";
+import { ThemeProvider } from "next-themes";
 import Providers from "@/app/providers";
 import AppLayout from "@/app/(app)/layout";
 import ChatPage from "@/app/(app)/app/chat/page";
@@ -187,7 +188,7 @@ function App() {
     return (
       <div className="flex h-screen flex-col overflow-hidden">
         <DesktopTitleBar />
-        <div className="min-h-0 flex-1"><Providers>
+        <div className="relative min-h-0 flex-1 contain-[layout]"><Providers>
           <DesktopRouter desktopPage={
           <main className="relative h-full overflow-y-auto">
             <div className="pointer-events-none absolute right-8 top-8 text-[#6f8747] opacity-[0.05]"><Leaf className="h-52 w-52 rotate-12" /></div>
@@ -215,42 +216,28 @@ function App() {
   return (
     <div className="flex h-screen flex-col overflow-hidden">
       <DesktopTitleBar />
-      <main className="app-shell desktop-ui min-h-0 flex-1 overflow-y-auto">
-      {/* Botanical background decorations */}
-      <div style={{ position: "fixed", right: 24, top: 80, color: "#6f8747", opacity: 0.06, pointerEvents: "none", zIndex: 0 }}>
-        <Leaf size={120} style={{ transform: "rotate(20deg)" }} />
-      </div>
-      <div style={{ position: "fixed", left: 16, bottom: 60, color: "#d98f82", opacity: 0.08, pointerEvents: "none", zIndex: 0 }}>
-        <ButterflyDecor style={{ width: 80, height: 56 }} />
-      </div>
-      <div style={{ position: "fixed", right: 60, bottom: 40, color: "#6f8747", opacity: 0.06, pointerEvents: "none", zIndex: 0 }}>
-        <Flower2 size={72} style={{ transform: "rotate(15deg)" }} />
-      </div>
+      <ThemeProvider attribute="class" defaultTheme="system" enableSystem disableTransitionOnChange>
+        <main className="relative flex min-h-0 flex-1 flex-col overflow-y-auto bg-[#f8f5e9] dark:bg-[#0e1a13]">
+          {/* Botanical background decorations */}
+          <div className="pointer-events-none absolute right-8 top-8 z-0 text-[#6f8747] opacity-[0.06]"><Leaf className="h-28 w-28 rotate-20" /></div>
+          <div className="pointer-events-none absolute bottom-14 left-4 z-0 text-[#d98f82] opacity-[0.08]"><ButterflyDecor style={{ width: 80, height: 56 }} /></div>
+          <div className="pointer-events-none absolute bottom-10 right-14 z-0 text-[#6f8747] opacity-[0.06]"><Flower2 className="h-16 w-16 rotate-15" /></div>
 
-      {/* Topbar */}
-      <section className="topbar">
-        <div className="brand-lockup">
-          <div className="brand-mark"><Leaf size={18} /></div>
-          <div className="topbar-copy">
-            <p className="eyebrow">Aloe Desktop</p>
-            <h1>Local agent</h1>
+          <div className="relative z-10 flex items-center gap-3 px-6 pt-8 sm:px-10">
+            <div className="brand-mark h-9 w-9"><Leaf className="h-4 w-4" /></div>
+            <div>
+              <p className="eyebrow">Aloe Desktop</p>
+              <h1 className="mt-0.5 font-display text-xl font-semibold text-[#0b3026] dark:text-[#e8f0e0]">Local agent</h1>
+            </div>
           </div>
-        </div>
-        {authenticated && (
-          <div className={connected ? "status online" : "status offline"}>
-            <span className="status-dot" />
-            <MonitorCheck size={14} />
-            {connected ? "Socket connected" : config.socketStatus || "Not connected"}
+
+          <div className="relative z-10 flex flex-1 items-center justify-center">
+            <AuthScreen setupToken={setupToken} onTokenChange={setSetupToken} onConnect={() => void connect()} />
           </div>
-        )}
-      </section>
 
-      <div style={{ position: "relative", zIndex: 1 }}>
-        <AuthScreen setupToken={setupToken} onTokenChange={setSetupToken} onConnect={() => void connect()} />
-      </div>
-
-      <ToastContainer toasts={toasts} onDismiss={dismiss} />
-      </main>
+          <ToastContainer toasts={toasts} onDismiss={dismiss} />
+        </main>
+      </ThemeProvider>
     </div>
   );
 }
