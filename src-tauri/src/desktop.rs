@@ -4,7 +4,8 @@ use tauri::{
     App, AppHandle, Manager, Runtime,
 };
 
-use crate::config::AppState;
+use crate::config::{save_config, AppState};
+use crate::notifications;
 
 pub const TRAY_ID: &str = "aloe-tray";
 const OPEN_ID: &str = "tray-open";
@@ -18,9 +19,28 @@ pub fn show_main_window<R: Runtime>(app: &AppHandle<R>) {
     }
 }
 
-pub fn hide_main_window<R: Runtime>(app: &AppHandle<R>) {
+pub fn hide_main_window(app: &AppHandle) {
     if let Some(window) = app.get_webview_window("main") {
         let _ = window.hide();
+    }
+
+    let should_notify = {
+        let state = app.state::<AppState>();
+        let mut config = state.config.lock().expect("config mutex");
+        if config.has_shown_tray_notification {
+            false
+        } else {
+            config.has_shown_tray_notification = true;
+            let _ = save_config(&config);
+            true
+        }
+    };
+    if should_notify {
+        let _ = notifications::show_clickable(
+            app,
+            "Aloe is still running",
+            "Aloe is running in the background. Reopen it anytime from the system tray.",
+        );
     }
 }
 

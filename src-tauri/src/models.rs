@@ -33,6 +33,7 @@ pub struct AgentConfig {
     pub always_allow_commands: bool,
     pub run_on_startup: bool,
     pub start_minimized: bool,
+    pub has_shown_tray_notification: bool,
     pub folders: Vec<GrantedFolder>,
     pub recent_actions: Vec<RecentAction>,
 }
