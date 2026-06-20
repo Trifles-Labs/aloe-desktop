@@ -13,6 +13,7 @@ use std::{collections::HashMap, fs as std_fs, sync::Mutex};
 use tauri::{AppHandle, Manager, State};
 use tauri_plugin_dialog::DialogExt;
 use tauri_plugin_autostart::{MacosLauncher, ManagerExt};
+use tauri_plugin_opener::OpenerExt;
 
 use config::{
     add_recent, debug_log, load_config, make_granted_folder,
@@ -38,6 +39,11 @@ fn get_pending_approvals(state: State<AppState>) -> Vec<PendingApproval> {
 #[tauri::command]
 fn hide_main_window(app: AppHandle) {
     desktop::hide_main_window(&app);
+}
+
+#[tauri::command]
+fn open_external_url(app: AppHandle, url: String) -> Result<(), String> {
+    app.opener().open_url(url, None::<String>).map_err(|error| error.to_string())
 }
 
 #[tauri::command]
@@ -291,6 +297,7 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_autostart::init(MacosLauncher::LaunchAgent, Some(vec!["--autostart"])))
+        .plugin(tauri_plugin_opener::init())
         .manage(AppState {
             config: Mutex::new(initial_config),
             pending: Mutex::new(Vec::new()),
@@ -301,6 +308,7 @@ pub fn run() {
             get_config,
             get_pending_approvals,
             hide_main_window,
+            open_external_url,
             set_run_on_startup,
             set_start_minimized,
             reset_agent_connection,

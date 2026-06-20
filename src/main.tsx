@@ -34,6 +34,7 @@ const preferenceShape = (config: AgentConfig): DesktopPreferences => ({ runOnSta
   getPreferences: async () => preferenceShape(await invoke<AgentConfig>("get_config")),
   setRunOnStartup: async (enabled: boolean) => preferenceShape(await invoke<AgentConfig>("set_run_on_startup", { enabled })),
   setStartMinimized: async (enabled: boolean) => preferenceShape(await invoke<AgentConfig>("set_start_minimized", { enabled })),
+  openExternal: (url: string) => invoke<void>("open_external_url", { url }),
 };
 
 function DesktopRouter({ desktopPage }: { desktopPage: React.ReactNode }) {

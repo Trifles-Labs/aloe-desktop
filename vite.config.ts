@@ -26,6 +26,9 @@ export default defineConfig(({ command }) => ({
     "process.env.NEXT_PUBLIC_API_URL": JSON.stringify(
       process.env.ALOE_BACKEND_URL ?? (command === "serve" ? "http://127.0.0.1:8080" : "https://api.247autoarmy.in"),
     ),
+    "process.env.NEXT_PUBLIC_APP_URL": JSON.stringify(
+      process.env.ALOE_FRONTEND_URL ?? (command === "serve" ? "http://localhost:3000" : "https://aloe.247autoarmy.in"),
+    ),
   },
   server: {
     strictPort: true,
