@@ -62,7 +62,8 @@ After a successful build, find the updatable artifacts here:
 
 | Platform | Artifact path (relative to `src-tauri/target/release/bundle/`) |
 |---|---|
-| Windows | `nsis/Aloe Desktop_1.2.0_x64-setup.nsis.zip` + `.sig` |
+| Windows (NSIS) | `nsis/Aloe Desktop_1.2.0_x64-setup.exe` + `.exe.sig` |
+| Windows (MSI) | `msi/Aloe Desktop_1.2.0_x64_en-US.msi` + `.msi.sig` |
 | macOS (Apple Silicon) | `macos/Aloe Desktop.app.tar.gz` + `.sig` |
 | macOS (Intel) | `macos/Aloe Desktop.app.tar.gz` + `.sig` *(cross-compiled)* |
 | Linux | `appimage/aloe-desktop_1.2.0_amd64.AppImage.tar.gz` + `.sig` |
@@ -82,7 +83,7 @@ If serving from the backend, drop them in a `public/` or `static/` directory and
 ### 2. Get the signature string
 
 ```sh
-cat "src-tauri/target/release/bundle/nsis/Aloe Desktop_1.2.0_x64-setup.nsis.zip.sig"
+cat "src-tauri/target/release/bundle/nsis/Aloe Desktop_1.2.0_x64-setup.exe.sig"
 ```
 
 Copy the full output including the `untrusted comment: ...` header line.
