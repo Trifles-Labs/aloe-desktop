@@ -65,7 +65,8 @@ def main():
         print("Expected at: aloe-desktop/.tauri/aloe.key")
         sys.exit(1)
 
-    private_key = KEY_PATH.read_text(encoding="utf-8")
+    # Tauri v2 expects the base64-encoded key string directly — it decodes internally
+    private_key = KEY_PATH.read_text(encoding="utf-8").strip()
 
     env = os.environ.copy()
     env["TAURI_SIGNING_PRIVATE_KEY"] = private_key
@@ -88,23 +89,25 @@ def main():
         sys.exit(result.returncode)
 
     # ── Artifacts ─────────────────────────────────────────────────────────────
-    zip_name = f"Aloe Desktop_{version}_x64-setup.nsis.zip"
-    zip_path = BUNDLE_DIR / "nsis" / zip_name
-    sig_path = Path(str(zip_path) + ".sig")
+    artifacts = [
+        ("NSIS installer", BUNDLE_DIR / "nsis" / f"Aloe Desktop_{version}_x64-setup.exe"),
+        ("MSI installer",  BUNDLE_DIR / "msi"  / f"Aloe Desktop_{version}_x64_en-US.msi"),
+    ]
 
     print("\n─── Build artifacts ────────────────────────────────────────────")
-
-    if zip_path.exists():
-        print(f"Installer : {zip_path}")
-    else:
-        print(f"WARNING   : installer not found at\n            {zip_path}")
-
-    if sig_path.exists():
-        sig = sig_path.read_text(encoding="utf-8").strip()
-        print(f"Signature : {sig_path}")
-        print(f"\n─── Signature string (paste into the dashboard) ────────────────\n{sig}\n")
-    else:
-        print(f"WARNING   : signature file not found at\n            {sig_path}")
+    for label, path in artifacts:
+        sig_path = Path(str(path) + ".sig")
+        if path.exists():
+            print(f"\n{label}:")
+            print(f"  File : {path}")
+            if sig_path.exists():
+                sig = sig_path.read_text(encoding="utf-8").strip()
+                print(f"  Sig  : {sig_path}")
+                print(f"\n─── {label} signature (paste into dashboard) ───\n{sig}\n")
+            else:
+                print(f"  WARNING: .sig file not found at {sig_path}")
+        else:
+            print(f"\nWARNING: {label} not found at {path}")
 
     print("Done. Follow UPDATER.md → Publishing a release to register it in the dashboard.")
 
