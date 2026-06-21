@@ -10,6 +10,6 @@
     "core:window:allow-is-maximized",
     "core:event:default",
     "updater:default",
-    "process:allow-relaunch"
+    "process:allow-restart"
   ]
 }
