@@ -6,8 +6,8 @@ use tokio::process::Command;
 
 use crate::config::{add_recent, debug_log, save_config, AppState, COMMAND_TIMEOUT_SECONDS};
 use crate::fs::{
-    apply_patch, assert_granted, create_file, create_folder, delete_file, delete_folder,
-    input_string, list_files, read_file, truncate_text, update_file, update_folder,
+    apply_patch, assert_granted, attach_file, create_file, create_folder, delete_file,
+    delete_folder, input_string, list_files, read_file, truncate_text, update_file, update_folder,
 };
 use crate::models::{AgentConfig, AgentJob, PendingApproval};
 use crate::notifications;
@@ -172,6 +172,7 @@ pub async fn dispatch_tool(
         "apply_local_patch"      => apply_patch(config.clone(), job.input.clone()).await,
         "create_file"            => create_file(config, &job.input),
         "read_file"              => read_file(config, &job.input),
+        "attach_file"            => attach_file(config, &job.input),
         "update_file"            => update_file(config, &job.input),
         "delete_file"            => delete_file(config, &job.input),
         "create_folder"          => create_folder(config, &job.input),

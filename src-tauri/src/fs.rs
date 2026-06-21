@@ -1,3 +1,4 @@
+use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
 use serde_json::{json, Value};
 use std::{
     fs,
@@ -89,6 +90,57 @@ pub fn read_file(config: &AgentConfig, input: &Value) -> Result<Value, String> {
     let path = assert_granted(config, &input_string(input, "path")?)?;
     let content = fs::read_to_string(&path).map_err(|e| e.to_string())?;
     Ok(json!({ "path": path.to_string_lossy(), "file": truncate_text(content) }))
+}
+
+fn mime_type_from_path(path: &Path) -> &'static str {
+    match path.extension().and_then(|e| e.to_str()).map(str::to_lowercase).as_deref() {
+        Some("png") => "image/png",
+        Some("jpg") | Some("jpeg") => "image/jpeg",
+        Some("gif") => "image/gif",
+        Some("webp") => "image/webp",
+        Some("heic") => "image/heic",
+        Some("heif") => "image/heif",
+        Some("pdf") => "application/pdf",
+        Some("mp3") => "audio/mp3",
+        Some("wav") => "audio/wav",
+        Some("aac") => "audio/aac",
+        Some("ogg") => "audio/ogg",
+        Some("flac") => "audio/flac",
+        Some("aiff") | Some("aif") => "audio/aiff",
+        Some("mp4") => "video/mp4",
+        Some("mov") => "video/mov",
+        Some("mpeg") | Some("mpg") => "video/mpeg",
+        Some("webm") => "video/webm",
+        Some("avi") => "video/avi",
+        Some("3gp") | Some("3gpp") => "video/3gpp",
+        _ => "application/octet-stream",
+    }
+}
+
+const MAX_ATTACH_BYTES: u64 = 15_000_000; // ~15 MB raw
+
+pub fn attach_file(config: &AgentConfig, input: &Value) -> Result<Value, String> {
+    let path = assert_granted(config, &input_string(input, "path")?)?;
+    let meta = fs::metadata(&path).map_err(|e| e.to_string())?;
+    if !meta.is_file() {
+        return Err(format!("Path is not a file: {}", path.display()));
+    }
+    let size = meta.len();
+    if size > MAX_ATTACH_BYTES {
+        return Err(format!(
+            "File is too large to attach ({} bytes). Maximum is {} bytes.",
+            size, MAX_ATTACH_BYTES
+        ));
+    }
+    let bytes = fs::read(&path).map_err(|e| e.to_string())?;
+    let mime_type = mime_type_from_path(&path);
+    let base64 = BASE64.encode(&bytes);
+    Ok(json!({
+        "path": path.to_string_lossy(),
+        "mimeType": mime_type,
+        "base64": base64,
+        "sizeBytes": size,
+    }))
 }
 
 pub fn create_file(config: &AgentConfig, input: &Value) -> Result<Value, String> {
