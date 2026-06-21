@@ -109,6 +109,8 @@ pub async fn socket_loop(app: AppHandle) {
                 if let Err(e) = sync_folders_with_config(&state.client, &config).await {
                     debug_log("folders", "sync_error", e);
                 }
+                // Drain any jobs (e.g. notifications) that were queued while the desktop was offline
+                drain_queued_jobs(&app, &state, &config, &credential, &fp).await;
                 reconnect_ms = 1_000;
                 run_connected_loop(&app, socket, &credential, &fp).await;
             }
@@ -193,6 +195,31 @@ async fn run_connected_loop(
     }
 }
 
+async fn drain_queued_jobs(
+    app: &AppHandle,
+    state: &tauri::State<'_, AppState>,
+    config: &AgentConfig,
+    credential: &str,
+    fp: &str,
+) {
+    if let Ok(resp) = state.client
+        .get(format!("{}/api/agent/jobs", config.api_url))
+        .bearer_auth(credential)
+        .send()
+        .await
+    {
+        if let Ok(list) = resp.json::<JobList>().await {
+            if !list.jobs.is_empty() {
+                debug_log("socket", "drain_queued", format!("fp={fp} count={}", list.jobs.len()));
+            }
+            for job in list.jobs {
+                let handle = app.clone();
+                tokio::spawn(async move { execute_job(handle, job).await; });
+            }
+        }
+    }
+}
+
 async fn handle_offline_fallback(
     app: &AppHandle,
     state: &tauri::State<'_, AppState>,
@@ -222,18 +249,5 @@ async fn handle_offline_fallback(
         return;
     }
 
-    if let Ok(resp) = state.client
-        .get(format!("{}/api/agent/jobs", config.api_url))
-        .bearer_auth(credential)
-        .send()
-        .await
-    {
-        if let Ok(list) = resp.json::<JobList>().await {
-            debug_log("http_fallback", "jobs_loaded", format!("count={}", list.jobs.len()));
-            for job in list.jobs {
-                let handle = app.clone();
-                tokio::spawn(async move { execute_job(handle, job).await; });
-            }
-        }
-    }
+    drain_queued_jobs(app, state, config, credential, fp).await;
 }

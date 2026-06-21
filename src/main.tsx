@@ -4,6 +4,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { Flower2, Leaf, MonitorCheck } from "lucide-react";
 
 import { useToasts, ToastContainer } from "./toast";
+import { useAutoUpdate } from "./hooks/useAutoUpdate";
 import { ButterflyDecor } from "./components/ButterflyDecor";
 import { AuthScreen } from "./components/AuthScreen";
 import { ConnectionPanel } from "./components/ConnectionPanel";
@@ -60,6 +61,7 @@ function App() {
   const [pending, setPending] = useState<PendingApproval[]>([]);
   const [setupToken, setSetupToken] = useState("");
   const { toasts, toast, dismiss } = useToasts();
+  const { updateReady, restart } = useAutoUpdate();
 
   const authenticated = Boolean(config.agentId && config.credential && config.userToken);
   const connected = config.socketStatus === "connected";
@@ -189,6 +191,20 @@ function App() {
     return (
       <div className="flex h-screen flex-col overflow-hidden">
         <DesktopTitleBar />
+        {updateReady && (
+          <div
+            role="status"
+            className="flex items-center justify-between gap-3 bg-[#d4eedc] px-4 py-2 text-sm font-medium text-[#1a4d2e] dark:bg-[#1e3a28] dark:text-[#7ecb99]"
+          >
+            <span>A new version of Aloe Desktop has been downloaded and is ready to install.</span>
+            <button
+              onClick={() => void restart()}
+              className="rounded-md bg-[#2d7a4f] px-3 py-1 text-xs font-semibold text-white hover:bg-[#246040]"
+            >
+              Restart now
+            </button>
+          </div>
+        )}
         <div className="relative min-h-0 flex-1 contain-[layout]"><Providers>
           <DesktopRouter desktopPage={
           <main className="relative h-full overflow-y-auto">
