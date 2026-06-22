@@ -177,9 +177,9 @@ function App() {
 
   const setAlwaysAllow = async (enabled: boolean) => {
     try {
-      const next = await invoke<AgentConfig>("set_always_allow_commands", { enabled });
+      const next = await invoke<AgentConfig>("set_command_trust_mode", { mode: enabled ? "trusted_coding" : "ask" });
       setConfig(next);
-      toast(enabled ? "Always-allow enabled." : "Per-command approval required again.", "info");
+      toast(enabled ? "Trusted Coding mode enabled." : "Per-command approval required again.", "info");
     } catch (err) {
       toast(`Setting failed: ${err instanceof Error ? err.message : String(err)}`, "error");
     }

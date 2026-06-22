@@ -166,9 +166,11 @@ async fn register_agent(app: AppHandle, state: State<'_, AppState>, token: Strin
 // ── Settings ──────────────────────────────────────────────────────────────────
 
 #[tauri::command]
-fn set_always_allow_commands(state: State<AppState>, enabled: bool) -> Result<AgentConfig, String> {
+fn set_command_trust_mode(state: State<AppState>, mode: String) -> Result<AgentConfig, String> {
+    if mode != "ask" && mode != "trusted_coding" { return Err("Unsupported command trust mode.".to_string()); }
     let mut config = state.config.lock().expect("config mutex");
-    config.always_allow_commands = enabled;
+    config.command_trust_mode = mode;
+    config.always_allow_commands = false;
     save_config(&config)?;
     Ok(config.clone())
 }
@@ -318,7 +320,7 @@ pub fn run() {
             set_start_minimized,
             reset_agent_connection,
             register_agent,
-            set_always_allow_commands,
+            set_command_trust_mode,
             sync_folders,
             add_folder,
             remove_folder,

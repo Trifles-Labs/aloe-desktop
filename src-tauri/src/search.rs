@@ -31,6 +31,7 @@ pub fn search_codebase(config: &AgentConfig, input: &Value) -> Result<Value, Str
     let root = assert_granted(config, &input_string(input, "path")?)?;
     let query = input_string(input, "query")?;
     let query_lower = query.to_lowercase();
+    let regex = if input.get("regex").and_then(Value::as_bool).unwrap_or(false) { Some(build_regex(&query, false)?) } else { None };
     let mut results = Vec::new();
 
     for entry in WalkDir::new(&root)
@@ -43,7 +44,7 @@ pub fn search_codebase(config: &AgentConfig, input: &Value) -> Result<Value, Str
         }
         let path = entry.path();
         let path_text = path.to_string_lossy();
-        if path_text.to_lowercase().contains(&query_lower) {
+        if regex.as_ref().map(|value| value.is_match(&path_text)).unwrap_or_else(|| path_text.to_lowercase().contains(&query_lower)) {
             results.push(json!({ "path": path_text, "match": "filename" }));
             continue;
         }
@@ -54,7 +55,7 @@ pub fn search_codebase(config: &AgentConfig, input: &Value) -> Result<Value, Str
             if let Some((line_num, line)) = content
                 .lines()
                 .enumerate()
-                .find(|(_, l)| l.to_lowercase().contains(&query_lower))
+                .find(|(_, line)| regex.as_ref().map(|value| value.is_match(line)).unwrap_or_else(|| line.to_lowercase().contains(&query_lower)))
             {
                 results.push(json!({
                     "path": path_text,

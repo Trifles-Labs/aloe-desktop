@@ -31,11 +31,24 @@ pub struct AgentConfig {
     pub socket_status: String,
     pub socket_error: Option<String>,
     pub always_allow_commands: bool,
+    pub command_trust_mode: String,
     pub run_on_startup: bool,
     pub start_minimized: bool,
     pub has_shown_tray_notification: bool,
     pub folders: Vec<GrantedFolder>,
     pub recent_actions: Vec<RecentAction>,
+    pub terminal_sessions: Vec<PersistedTerminalSession>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PersistedTerminalSession {
+    pub session_id: String,
+    pub command: String,
+    pub cwd: String,
+    pub started_at: String,
+    pub status: String,
+    pub exit_code: Option<i32>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

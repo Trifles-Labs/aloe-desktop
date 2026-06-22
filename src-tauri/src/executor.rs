@@ -13,7 +13,7 @@ use crate::models::{AgentConfig, AgentJob, PendingApproval};
 use crate::notifications;
 use crate::search::search_codebase;
 use crate::terminal::{
-    list_terminal_sessions, read_terminal_session, start_terminal_session, stop_terminal_session,
+    list_terminal_sessions, read_terminal_session, start_terminal_session, stop_terminal_session, wait_terminal_session,
     write_terminal_session,
 };
 
@@ -27,6 +27,33 @@ fn hide_command_window(command: &mut Command) {
 
 #[cfg(not(target_os = "windows"))]
 fn hide_command_window(_command: &mut Command) {}
+
+fn trusted_coding_command(command: &str) -> bool {
+    let normalized = command.trim().to_lowercase();
+    let dangerous = ["sudo ", "runas ", "rm -rf", "del /s", "rmdir /s", "git push", "git reset", "git clean", "npm publish", "bun publish", "deploy", "curl ", "wget ", ".env", "setx ", "chmod 777"];
+    if dangerous.iter().any(|token| normalized.contains(token)) || ["&&", "||", ";", "|"].iter().any(|token| normalized.contains(token)) { return false; }
+    let safe = ["rg ", "git status", "git diff", "git log", "git show", "git branch", "bun install", "bun add", "bun run ", "bunx tsc", "npm install", "npm run ", "npm test", "pnpm install", "pnpm add", "pnpm run ", "yarn install", "yarn add", "yarn run ", "cargo check", "cargo test", "cargo build", "go test", "dotnet test", "dotnet build"];
+    safe.iter().any(|prefix| normalized == prefix.trim() || normalized.starts_with(prefix))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::trusted_coding_command;
+
+    #[test]
+    fn allows_normal_project_verification() {
+        assert!(trusted_coding_command("bun install"));
+        assert!(trusted_coding_command("cargo test"));
+        assert!(trusted_coding_command("git diff -- src/lib.rs"));
+    }
+
+    #[test]
+    fn blocks_destructive_or_compound_commands() {
+        assert!(!trusted_coding_command("git reset --hard"));
+        assert!(!trusted_coding_command("bun test && git push"));
+        assert!(!trusted_coding_command("npm publish"));
+    }
+}
 
 // ── Shell command execution ───────────────────────────────────────────────────
 
@@ -94,7 +121,8 @@ pub async fn execute_job(app: AppHandle, job: AgentJob) {
 
     // Commands require explicit approval (or auto-approval if always_allow is set)
     if job.kind == "run_command" || job.kind == "run_local_command" || job.kind == "start_terminal_session" {
-        if config.always_allow_commands {
+        let command = input_string(&job.input, "command").unwrap_or_default();
+        if config.command_trust_mode == "trusted_coding" && trusted_coding_command(&command) {
             let input_snapshot = job.input.clone();
             let result = if job.kind == "start_terminal_session" {
                 start_terminal_session(&state, config.clone(), job.input.clone()).await
@@ -186,6 +214,7 @@ pub async fn dispatch_tool(
         "write_terminal_session" => write_terminal_session(state, job.input.clone()).await,
         "stop_terminal_session"  => stop_terminal_session(state, job.input.clone()).await,
         "list_terminal_sessions" => list_terminal_sessions(state).await,
+        "wait_terminal_session"  => wait_terminal_session(state, job.input.clone()).await,
         "open_local_url"         => open_local_url(&job.input).await,
         "capture_desktop_screenshot" => capture_desktop_screenshot().await,
         "get_editor_context"     => get_editor_context(config, &job.input).await,

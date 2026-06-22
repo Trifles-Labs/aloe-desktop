@@ -89,7 +89,11 @@ pub fn list_files(config: &AgentConfig, input: &Value) -> Result<Value, String> 
 pub fn read_file(config: &AgentConfig, input: &Value) -> Result<Value, String> {
     let path = assert_granted(config, &input_string(input, "path")?)?;
     let content = fs::read_to_string(&path).map_err(|e| e.to_string())?;
-    Ok(json!({ "path": path.to_string_lossy(), "file": truncate_text(content) }))
+    let lines: Vec<&str> = content.lines().collect();
+    let start = input.get("startLine").and_then(Value::as_u64).unwrap_or(1).max(1) as usize;
+    let end = input.get("endLine").and_then(Value::as_u64).unwrap_or(lines.len() as u64).max(start as u64) as usize;
+    let selected = lines.iter().skip(start - 1).take(end - start + 1).copied().collect::<Vec<_>>().join("\n");
+    Ok(json!({ "path": path.to_string_lossy(), "file": truncate_text(selected), "startLine": start, "endLine": end.min(lines.len()), "totalLines": lines.len() }))
 }
 
 fn mime_type_from_path(path: &Path) -> &'static str {

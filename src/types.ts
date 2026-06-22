@@ -27,10 +27,12 @@ export type AgentConfig = {
   socketStatus: string;
   socketError: string | null;
   alwaysAllowCommands: boolean;
+  commandTrustMode: "ask" | "trusted_coding";
   runOnStartup: boolean;
   startMinimized: boolean;
   folders: GrantedFolder[];
   recentActions: RecentAction[];
+  terminalSessions: Array<{ sessionId: string; command: string; cwd: string; startedAt: string; status: string; exitCode: number | null }>;
 };
 
 export type PendingApproval = {
@@ -71,10 +73,12 @@ export const DEFAULT_CONFIG: AgentConfig = {
   socketStatus: "disconnected",
   socketError: null,
   alwaysAllowCommands: false,
+  commandTrustMode: "ask",
   runOnStartup: false,
   startMinimized: false,
   folders: [],
   recentActions: [],
+  terminalSessions: [],
 };
 
 // ── Utility functions ─────────────────────────────────────────────────────────
