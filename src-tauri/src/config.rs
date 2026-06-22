@@ -52,6 +52,7 @@ pub fn make_default_config() -> AgentConfig {
             .unwrap_or_else(|_| "Aloe Desktop".to_string()),
         platform: std::env::consts::OS.to_string(),
         socket_status: "disconnected".to_string(),
+        command_trust_mode: "ask".to_string(),
         ..Default::default()
     }
 }
@@ -84,6 +85,13 @@ pub fn load_config() -> AgentConfig {
     if config.platform.is_empty() {
         config.platform = std::env::consts::OS.to_string();
     }
+    if config.command_trust_mode.is_empty() {
+        config.command_trust_mode = if config.always_allow_commands { "trusted_coding" } else { "ask" }.to_string();
+    }
+    for session in &mut config.terminal_sessions {
+        if session.status == "running" { session.status = "interrupted".to_string(); }
+    }
+    config.terminal_sessions.truncate(50);
     config
 }
 
