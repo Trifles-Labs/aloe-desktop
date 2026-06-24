@@ -7,6 +7,7 @@ use serde_json::Value;
 
 use crate::models::{AgentConfig, GrantedFolder, PendingApproval, RecentAction};
 use crate::terminal::TerminalSession;
+use crate::voice::VoiceState;
 
 pub const FALLBACK_PROD_API_URL: &str = "https://api.247autoarmy.in/";
 // pub const FALLBACK_PROD_API_URL: &str = "http://localhost:8080/";
@@ -20,6 +21,7 @@ pub struct AppState {
     pub config: Mutex<AgentConfig>,
     pub pending: Mutex<Vec<PendingApproval>>,
     pub terminals: Mutex<HashMap<String, TerminalSession>>,
+    pub voice: Mutex<VoiceState>,
     pub client: Client,
 }
 
@@ -86,10 +88,17 @@ pub fn load_config() -> AgentConfig {
         config.platform = std::env::consts::OS.to_string();
     }
     if config.command_trust_mode.is_empty() {
-        config.command_trust_mode = if config.always_allow_commands { "trusted_coding" } else { "ask" }.to_string();
+        config.command_trust_mode = if config.always_allow_commands {
+            "trusted_coding"
+        } else {
+            "ask"
+        }
+        .to_string();
     }
     for session in &mut config.terminal_sessions {
-        if session.status == "running" { session.status = "interrupted".to_string(); }
+        if session.status == "running" {
+            session.status = "interrupted".to_string();
+        }
     }
     config.terminal_sessions.truncate(50);
     config

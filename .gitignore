@@ -3,3 +3,7 @@ dist
 src-tauri/target
 src-tauri/gen
 *.log
+
+# Native voice-assistant assets, fetched via scripts/fetch-voice-assets.ps1
+src-tauri/vendor
+src-tauri/resources/vosk-model-small-en-us-0.15

@@ -11,14 +11,18 @@ Usage:
 import getpass
 import json
 import os
+import shutil
 import subprocess
 import sys
+import urllib.parse
 from pathlib import Path
 
-SCRIPT_DIR = Path(__file__).parent.resolve()
-TAURI_CONF  = SCRIPT_DIR / "src-tauri" / "tauri.conf.json"
-KEY_PATH    = SCRIPT_DIR / ".tauri" / "aloe.key"
-BUNDLE_DIR  = SCRIPT_DIR / "src-tauri" / "target" / "release" / "bundle"
+SCRIPT_DIR   = Path(__file__).parent.resolve()
+TAURI_CONF   = SCRIPT_DIR / "src-tauri" / "tauri.conf.json"
+KEY_PATH     = SCRIPT_DIR / ".tauri" / "aloe.key"
+BUNDLE_DIR   = SCRIPT_DIR / "src-tauri" / "target" / "release" / "bundle"
+FRONTEND_DIR = SCRIPT_DIR.parent / "aloe-frontend" / "public" / "desktop"
+FRONTEND_URL = "https://aloe.247autoarmy.in"
 
 
 def read_conf():
@@ -109,7 +113,19 @@ def main():
         else:
             print(f"\nWARNING: {label} not found at {path}")
 
-    print("Done. Follow UPDATER.md → Publishing a release to register it in the dashboard.")
+    # ── Copy installer to frontend public folder ──────────────────────────────
+    nsis_path = BUNDLE_DIR / "nsis" / f"Aloe Desktop_{version}_x64-setup.exe"
+    if nsis_path.exists():
+        FRONTEND_DIR.mkdir(parents=True, exist_ok=True)
+        dest = FRONTEND_DIR / nsis_path.name
+        shutil.copy2(nsis_path, dest)
+        url_path = "/desktop/" + urllib.parse.quote(nsis_path.name)
+        print(f"\n─── Download URL ───────────────────────────────────────────────")
+        print(f"  {FRONTEND_URL}{url_path}")
+    else:
+        print(f"\nWARNING: NSIS installer not found, skipping frontend copy.")
+
+    print("\nDone. Follow UPDATER.md → Publishing a release to register it in the dashboard.")
 
 
 if __name__ == "__main__":

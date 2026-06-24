@@ -30,6 +30,7 @@ export type AgentConfig = {
   commandTrustMode: "ask" | "trusted_coding";
   runOnStartup: boolean;
   startMinimized: boolean;
+  wakeWordEnabled: boolean;
   folders: GrantedFolder[];
   recentActions: RecentAction[];
   terminalSessions: Array<{ sessionId: string; command: string; cwd: string; startedAt: string; status: string; exitCode: number | null }>;
@@ -41,15 +42,6 @@ export type PendingApproval = {
   cwd: string;
   reason: string;
   requestedAt: string;
-};
-
-export type SearchMode = "content" | "files";
-
-export type SearchMatch = {
-  path: string;
-  matchType: "content" | "file" | "directory";
-  line: number | null;
-  preview: string | null;
 };
 
 export type ToastVariant = "success" | "error" | "info";
@@ -76,30 +68,12 @@ export const DEFAULT_CONFIG: AgentConfig = {
   commandTrustMode: "ask",
   runOnStartup: false,
   startMinimized: false,
+  wakeWordEnabled: false,
   folders: [],
   recentActions: [],
   terminalSessions: [],
 };
 
-// ── Utility functions ─────────────────────────────────────────────────────────
-
-export function pathBasename(p: string): string {
-  return p.replace(/\\/g, "/").split("/").pop() ?? p;
-}
-
-export function pathDirname(p: string): string {
-  const parts = p.replace(/\\/g, "/").split("/");
-  parts.pop();
-  return parts.join("/");
-}
-
-export function statusMarkClass(status: string): string {
-  const s = status.toLowerCase();
-  if (s === "failed" || s === "error" || s === "denied") return "mark-error";
-  if (s === "pending" || s === "waiting") return "mark-pending";
-  if (s === "running" || s === "active" || s === "in_progress") return "mark-running";
-  return "";
-}
 
 export function formatTimestamp(ts: string): string {
   try {
