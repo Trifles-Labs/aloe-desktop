@@ -31,4 +31,16 @@ impl VoiceState {
             handle.set_muted(muted);
         }
     }
+
+    pub fn resume_listening(&self) {
+        if let Some(handle) = &self.handle {
+            handle.resume_listening();
+        }
+    }
+
+    pub fn stop_current_turn(&self) {
+        if let Some(handle) = &self.handle {
+            handle.stop_current_turn();
+        }
+    }
 }
