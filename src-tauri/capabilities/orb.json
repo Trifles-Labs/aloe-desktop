@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "orb",
+  "description": "Capabilities for the floating wake-word orb window.",
+  "windows": ["orb"],
+  "permissions": ["core:event:default"]
+}

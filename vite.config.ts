@@ -35,4 +35,12 @@ export default defineConfig(({ command }) => ({
     port: 1420,
     fs: { allow: [here, webRoot] },
   },
+  build: {
+    rollupOptions: {
+      input: {
+        main: path.resolve(here, "index.html"),
+        orb: path.resolve(here, "orb.html"),
+      },
+    },
+  },
 }));

@@ -1,0 +1,4 @@
+# Points the linker at the vendored libvosk import library (vendor/vosk/libvosk.lib).
+# See vendor/vosk/README.md for how these files were obtained / how to refetch them.
+[target.x86_64-pc-windows-msvc]
+rustflags = ["-L", "vendor/vosk"]
