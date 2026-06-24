@@ -55,6 +55,19 @@ fn set_voice_muted(state: State<AppState>, muted: bool) {
 }
 
 #[tauri::command]
+fn resume_voice_listening(state: State<AppState>) {
+    state.voice.lock().expect("voice mutex").resume_listening();
+}
+
+#[tauri::command]
+fn stop_current_turn(app: AppHandle, state: State<AppState>) {
+    state.voice.lock().expect("voice mutex").stop_current_turn();
+    if let Some(orb) = app.get_webview_window("orb") {
+        let _ = orb.hide();
+    }
+}
+
+#[tauri::command]
 fn open_external_url(app: AppHandle, url: String) -> Result<(), String> {
     app.opener().open_url(url, None::<String>).map_err(|error| error.to_string())
 }
@@ -347,6 +360,8 @@ pub fn run() {
             hide_main_window,
             hide_orb_window,
             set_voice_muted,
+            resume_voice_listening,
+            stop_current_turn,
             open_external_url,
             set_run_on_startup,
             set_start_minimized,
