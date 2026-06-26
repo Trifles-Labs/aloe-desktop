@@ -41,7 +41,7 @@ const CHAT_TIMEOUT: Duration = Duration::from_secs(180);
 /// turn — the frontend's own hide-after-response is what normally fires first.
 const ORB_FALLBACK_AUTO_HIDE: Duration = Duration::from_secs(270);
 
-fn log(event: &str, detail: impl AsRef<str>) {
+pub(super) fn log(event: &str, detail: impl AsRef<str>) {
     println!("[voice] {event} {}", detail.as_ref());
 }
 
@@ -83,19 +83,19 @@ impl VoiceEngineHandle {
     }
 }
 
-/// Either listening for the wake word, or actively capturing the question that follows it.
-/// While capturing, raw audio is buffered alongside Vosk's recognizer: Vosk's small model is
-/// only used to detect *when* the user stops talking (its endpointer is reliable), while the
-/// buffered audio itself gets transcribed by Gemini, which is far more accurate.
+/// Either listening for the wake word, capturing the question that follows (legacy path), or
+/// streaming audio continuously to a Gemini Live session (Live path).
 enum ListenerMode {
     WakeWord(Recognizer),
     Capturing { recognizer: Recognizer, buffer: Vec<i16>, started_at: Instant },
+    /// Active Gemini Live session: audio is forwarded directly over WebSocket without buffering.
+    Live { pcm_sender: tokio::sync::mpsc::Sender<Vec<i16>> },
 }
 
 /// Shared handles every closure/async task needs to read or mutate listener state. Bundled
 /// into one struct instead of threading five separate Arcs through every function signature.
 #[derive(Clone)]
-struct ListenerShared {
+pub(super) struct ListenerShared {
     app: AppHandle,
     mode: Arc<Mutex<ListenerMode>>,
     model: Arc<Model>,
@@ -289,13 +289,7 @@ fn process_samples(shared: &ListenerShared, muted: &Arc<AtomicBool>, data: &[i16
                 return;
             }
 
-            log("wake_word", "detected, now capturing the question");
-            match wakeword::new_open_recognizer(&shared.model, shared.sample_rate) {
-                Ok(capture_recognizer) => {
-                    *guard = ListenerMode::Capturing { recognizer: capture_recognizer, buffer: Vec::new(), started_at: Instant::now() };
-                }
-                Err(error) => log("capture_recognizer_failed", &error),
-            }
+            log("wake_word", "detected, trying Live session first");
             drop(guard);
             on_wake_word(shared);
         }
@@ -348,6 +342,11 @@ fn process_samples(shared: &ListenerShared, muted: &Arc<AtomicBool>, data: &[i16
                 }
             }
         }
+        ListenerMode::Live { pcm_sender } => {
+            let resampled = super::live::resample_to_16k(&mono, shared.sample_rate);
+            // try_send never blocks the audio callback; silently drop frames if channel is full
+            let _ = pcm_sender.try_send(resampled);
+        }
     }
 }
 
@@ -392,6 +391,81 @@ fn on_wake_word(shared: &ListenerShared) {
     let _ = orb.show();
     let _ = orb.set_focus();
     renew_orb_watchdog(shared);
+
+    // Spawn an async task that tries Gemini Live first (×2 with 1s gap) then falls back to
+    // the legacy buffered-capture HTTP pipeline if both attempts fail.
+    let shared_clone = shared.clone();
+    let handle = tauri::async_runtime::spawn(async move {
+        try_dispatch_live_or_fallback(shared_clone).await;
+    });
+    *shared.current_dispatch.lock().expect("dispatch mutex") = Some(handle);
+}
+
+async fn try_dispatch_live_or_fallback(shared: ListenerShared) {
+    let (api_url, user_token) = {
+        let state = shared.app.state::<AppState>();
+        let config = state.config.lock().expect("config mutex");
+        (config.api_url.clone(), config.user_token.clone())
+    };
+
+    let Some(user_token) = user_token else {
+        log("live_dispatch", "not signed in, falling back to legacy path");
+        arm_legacy_capture(&shared);
+        return;
+    };
+
+    let conversation_id = (*shared.conversation_id).clone();
+
+    match super::live::connect_live(shared.app.clone(), shared.clone(), &conversation_id, &api_url, &user_token).await {
+        Ok(session) => {
+            install_live_session(&shared, session);
+            return;
+        }
+        Err(e) => log("live_connect_attempt1", &e),
+    }
+
+    tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
+
+    match super::live::connect_live(shared.app.clone(), shared.clone(), &conversation_id, &api_url, &user_token).await {
+        Ok(session) => install_live_session(&shared, session),
+        Err(e) => {
+            log("live_connect_attempt2", &e);
+            arm_legacy_capture(&shared);
+        }
+    }
+}
+
+fn install_live_session(shared: &ListenerShared, session: super::live::LiveSession) {
+    // If stop_current_turn fired between connect_live returning and here, dispatch is None —
+    // don't install the session over a user-initiated dismissal.
+    if shared.current_dispatch.lock().expect("dispatch mutex").is_none() {
+        log("live_session", "skipped — superseded by stop_current_turn");
+        session.task.abort();
+        return;
+    }
+    {
+        let mut guard = shared.mode.lock().expect("mode mutex");
+        *guard = ListenerMode::Live { pcm_sender: session.pcm_sender };
+    }
+    *shared.current_dispatch.lock().expect("dispatch mutex") = Some(session.task);
+    log("live_session", "installed, streaming started");
+}
+
+fn arm_legacy_capture(shared: &ListenerShared) {
+    // If stop_current_turn fired while the Live connection was being attempted, dispatch
+    // is None — don't switch to Capturing over a user-initiated dismissal.
+    if shared.current_dispatch.lock().expect("dispatch mutex").is_none() {
+        log("legacy_capture", "skipped — superseded by stop_current_turn");
+        return;
+    }
+    let mut guard = shared.mode.lock().expect("mode mutex");
+    match wakeword::new_open_recognizer(&shared.model, shared.sample_rate) {
+        Ok(recognizer) => {
+            *guard = ListenerMode::Capturing { recognizer, buffer: Vec::new(), started_at: Instant::now() };
+            log("legacy_capture", "armed");
+        }
+        Err(e) => log("arm_legacy_capture_failed", &e),
+    }
 }
 
 /// Schedules an auto-hide tied to the *current* activity generation. Renewing the watchdog
@@ -411,19 +485,14 @@ fn renew_orb_watchdog(shared: &ListenerShared) {
 
 #[derive(serde::Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
-struct VoicePayload {
-    text: String,
-    /// Tells the orb whether to go back to listening for a follow-up once it's done
-    /// speaking this, instead of idling and hiding.
-    continue_listening: bool,
-    /// Base64 WAV from Gemini TTS, if synthesis succeeded. `None` tells the orb to fall back
-    /// to the browser's built-in speech synthesis instead (used for short local status
-    /// messages too, like "I didn't catch a question", to avoid a TTS round-trip for those).
-    audio_base64: Option<String>,
+pub(super) struct VoicePayload {
+    pub(super) text: String,
+    pub(super) continue_listening: bool,
+    pub(super) audio_base64: Option<String>,
 }
 
 impl VoicePayload {
-    fn text_only(text: impl Into<String>, continue_listening: bool) -> Self {
+    pub(super) fn text_only(text: impl Into<String>, continue_listening: bool) -> Self {
         Self { text: text.into(), continue_listening, audio_base64: None }
     }
 }
@@ -502,7 +571,7 @@ fn rearm_capturing_if_idle(shared: &ListenerShared) {
     renew_orb_watchdog(shared);
 }
 
-fn reset_to_wake_word_only(shared: &ListenerShared) {
+pub(super) fn reset_to_wake_word_only(shared: &ListenerShared) {
     let mut guard = match shared.mode.lock() {
         Ok(guard) => guard,
         Err(_) => return,

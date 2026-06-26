@@ -11,6 +11,7 @@ const VOICE_THINKING_EVENT = "voice-thinking";
 const VOICE_STATUS_EVENT = "voice-status";
 const VOICE_RESPONSE_EVENT = "voice-response";
 const VOICE_ERROR_EVENT = "voice-error";
+const VOICE_LIVE_TRANSCRIPT_EVENT = "voice-live-transcript";
 
 type VoicePayload = { text: string; continueListening: boolean; audioBase64?: string };
 
@@ -263,6 +264,10 @@ function Orb() {
       setStatusText(event.payload);
     });
 
+    const unlistenLiveTranscript = listen<string>(VOICE_LIVE_TRANSCRIPT_EVENT, (event) => {
+      if (stateRef.current === "listening") setStatusText(event.payload);
+    });
+
     const unlistenResponse = listen<VoicePayload>(VOICE_RESPONSE_EVENT, (event) => {
       voiceDebug("event.response", { textChars: event.payload.text.length, continueListening: event.payload.continueListening, hasAudio: Boolean(event.payload.audioBase64) });
       const speechToken = speechTokenRef.current + 1;
@@ -295,6 +300,7 @@ function Orb() {
       void unlistenWake.then((stop) => stop());
       void unlistenThinking.then((stop) => stop());
       void unlistenStatus.then((stop) => stop());
+      void unlistenLiveTranscript.then((stop) => stop());
       void unlistenResponse.then((stop) => stop());
       void unlistenError.then((stop) => stop());
       if (hideTimer.current) window.clearTimeout(hideTimer.current);
@@ -305,7 +311,7 @@ function Orb() {
 
   const active = state !== "idle";
   const color = RING_COLOR[state];
-  const label = state === "thinking" && statusText ? statusText : STATE_LABEL[state];
+  const label = (state === "thinking" || state === "listening") && statusText ? statusText : STATE_LABEL[state];
 
   return (
     <div className="flex h-screen w-screen flex-col items-center justify-center gap-4" style={{ background: "transparent" }}>
