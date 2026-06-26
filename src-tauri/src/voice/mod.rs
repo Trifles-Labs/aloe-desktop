@@ -1,4 +1,5 @@
 mod capture;
+mod live;
 mod wakeword;
 
 use tauri::AppHandle;
