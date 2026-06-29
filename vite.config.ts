@@ -39,7 +39,6 @@ export default defineConfig(({ command }) => ({
     rollupOptions: {
       input: {
         main: path.resolve(here, "index.html"),
-        orb: path.resolve(here, "orb.html"),
       },
     },
   },

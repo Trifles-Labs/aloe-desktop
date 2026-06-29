@@ -7,7 +7,6 @@ mod notifications;
 mod search;
 mod socket;
 mod terminal;
-mod voice;
 
 use serde_json::json;
 use std::{collections::HashMap, fs as std_fs, sync::Mutex};
@@ -43,31 +42,6 @@ fn hide_main_window(app: AppHandle) {
 }
 
 #[tauri::command]
-fn hide_orb_window(app: AppHandle) {
-    if let Some(orb) = app.get_webview_window("orb") {
-        let _ = orb.hide();
-    }
-}
-
-#[tauri::command]
-fn set_voice_muted(state: State<AppState>, muted: bool) {
-    state.voice.lock().expect("voice mutex").set_muted(muted);
-}
-
-#[tauri::command]
-fn resume_voice_listening(state: State<AppState>) {
-    state.voice.lock().expect("voice mutex").resume_listening();
-}
-
-#[tauri::command]
-fn stop_current_turn(app: AppHandle, state: State<AppState>) {
-    state.voice.lock().expect("voice mutex").stop_current_turn();
-    if let Some(orb) = app.get_webview_window("orb") {
-        let _ = orb.hide();
-    }
-}
-
-#[tauri::command]
 fn open_external_url(app: AppHandle, url: String) -> Result<(), String> {
     app.opener().open_url(url, None::<String>).map_err(|error| error.to_string())
 }
@@ -92,22 +66,6 @@ fn set_run_on_startup(app: AppHandle, state: State<AppState>, enabled: bool) -> 
 fn set_start_minimized(state: State<AppState>, enabled: bool) -> Result<AgentConfig, String> {
     let mut config = state.config.lock().expect("config mutex");
     config.start_minimized = enabled;
-    save_config(&config)?;
-    Ok(config.clone())
-}
-
-#[tauri::command]
-fn set_wake_word_enabled(app: AppHandle, state: State<AppState>, enabled: bool) -> Result<AgentConfig, String> {
-    {
-        let mut voice = state.voice.lock().expect("voice mutex");
-        if enabled {
-            voice.start(app.clone())?;
-        } else {
-            voice.stop();
-        }
-    }
-    let mut config = state.config.lock().expect("config mutex");
-    config.wake_word_enabled = enabled;
     save_config(&config)?;
     Ok(config.clone())
 }
@@ -351,21 +309,15 @@ pub fn run() {
             config: Mutex::new(initial_config),
             pending: Mutex::new(Vec::new()),
             terminals: Mutex::new(HashMap::new()),
-            voice: Mutex::new(voice::VoiceState::default()),
             client: reqwest::Client::new(),
         })
         .invoke_handler(tauri::generate_handler![
             get_config,
             get_pending_approvals,
             hide_main_window,
-            hide_orb_window,
-            set_voice_muted,
-            resume_voice_listening,
-            stop_current_turn,
             open_external_url,
             set_run_on_startup,
             set_start_minimized,
-            set_wake_word_enabled,
             reset_agent_connection,
             register_agent,
             set_command_trust_mode,
@@ -387,13 +339,6 @@ pub fn run() {
             }
             if !(launched_by_autostart && preferences.start_minimized) {
                 desktop::show_main_window(app.handle());
-            }
-            if preferences.wake_word_enabled {
-                let app_state = app.state::<AppState>();
-                let mut voice = app_state.voice.lock().expect("voice mutex");
-                if let Err(error) = voice.start(app.handle().clone()) {
-                    debug_log("voice", "start_failed", error);
-                }
             }
             let handle = app.handle().clone();
             tauri::async_runtime::spawn(async move {
