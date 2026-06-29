@@ -28,13 +28,12 @@ import { DEFAULT_CONFIG } from "./types";
 import type { AgentConfig, PendingApproval } from "./types";
 import "./web.css";
 
-type DesktopPreferences = { runOnStartup: boolean; startMinimized: boolean; wakeWordEnabled: boolean };
-const preferenceShape = (config: AgentConfig): DesktopPreferences => ({ runOnStartup: config.runOnStartup, startMinimized: config.startMinimized, wakeWordEnabled: config.wakeWordEnabled });
+type DesktopPreferences = { runOnStartup: boolean; startMinimized: boolean };
+const preferenceShape = (config: AgentConfig): DesktopPreferences => ({ runOnStartup: config.runOnStartup, startMinimized: config.startMinimized });
 (window as Window & { __ALOE_DESKTOP__?: unknown }).__ALOE_DESKTOP__ = {
   getPreferences: async () => preferenceShape(await invoke<AgentConfig>("get_config")),
   setRunOnStartup: async (enabled: boolean) => preferenceShape(await invoke<AgentConfig>("set_run_on_startup", { enabled })),
   setStartMinimized: async (enabled: boolean) => preferenceShape(await invoke<AgentConfig>("set_start_minimized", { enabled })),
-  setWakeWordEnabled: async (enabled: boolean) => preferenceShape(await invoke<AgentConfig>("set_wake_word_enabled", { enabled })),
   openExternal: (url: string) => invoke<void>("open_external_url", { url }),
 };
 

@@ -7,7 +7,6 @@ use serde_json::Value;
 
 use crate::models::{AgentConfig, GrantedFolder, PendingApproval, RecentAction};
 use crate::terminal::TerminalSession;
-use crate::voice::VoiceState;
 
 pub const FALLBACK_PROD_API_URL: &str = "https://api.247autoarmy.in/";
 // pub const FALLBACK_PROD_API_URL: &str = "http://localhost:8080/";
@@ -21,7 +20,6 @@ pub struct AppState {
     pub config: Mutex<AgentConfig>,
     pub pending: Mutex<Vec<PendingApproval>>,
     pub terminals: Mutex<HashMap<String, TerminalSession>>,
-    pub voice: Mutex<VoiceState>,
     pub client: Client,
 }
 

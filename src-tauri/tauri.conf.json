@@ -19,21 +19,6 @@
                 "minHeight": 560,
                 "decorations": false,
                 "visible": false
-            },
-            {
-                "label": "orb",
-                "url": "orb.html",
-                "title": "Aloe",
-                "width": 600,
-                "height": 600,
-                "decorations": false,
-                "transparent": true,
-                "alwaysOnTop": true,
-                "skipTaskbar": true,
-                "resizable": false,
-                "shadow": false,
-                "center": true,
-                "visible": false
             }
         ],
         "security": {
@@ -51,9 +36,7 @@
             "icons/icon.icns",
             "icons/icon.ico"
         ],
-        "resources": {
-            "resources/vosk-model-small-en-us-0.15": "resources/vosk-model-small-en-us-0.15"
-        }
+        "resources": {}
     },
     "plugins": {
         "updater": {

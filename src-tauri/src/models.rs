@@ -34,8 +34,6 @@ pub struct AgentConfig {
     pub command_trust_mode: String,
     pub run_on_startup: bool,
     pub start_minimized: bool,
-    pub wake_word_enabled: bool,
-    pub voice_conversation_id: Option<String>,
     pub has_shown_tray_notification: bool,
     pub folders: Vec<GrantedFolder>,
     pub recent_actions: Vec<RecentAction>,

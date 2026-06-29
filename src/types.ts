@@ -30,7 +30,6 @@ export type AgentConfig = {
   commandTrustMode: "ask" | "trusted_coding";
   runOnStartup: boolean;
   startMinimized: boolean;
-  wakeWordEnabled: boolean;
   folders: GrantedFolder[];
   recentActions: RecentAction[];
   terminalSessions: Array<{ sessionId: string; command: string; cwd: string; startedAt: string; status: string; exitCode: number | null }>;
@@ -68,7 +67,6 @@ export const DEFAULT_CONFIG: AgentConfig = {
   commandTrustMode: "ask",
   runOnStartup: false,
   startMinimized: false,
-  wakeWordEnabled: false,
   folders: [],
   recentActions: [],
   terminalSessions: [],
