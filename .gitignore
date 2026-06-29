@@ -3,6 +3,7 @@ dist
 src-tauri/target
 src-tauri/gen
 *.log
+.env
 
 # Native voice-assistant assets, fetched via scripts/fetch-voice-assets.ps1
 src-tauri/vendor
