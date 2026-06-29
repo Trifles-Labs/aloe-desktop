@@ -1,4 +1,7 @@
-# Points the linker at the vendored libvosk import library (vendor/vosk/libvosk.lib).
-# See vendor/vosk/README.md for how these files were obtained / how to refetch them.
+# Points the linker at the vendored libvosk native libraries.
+# See scripts/fetch-voice-assets.ps1 for how these files are obtained.
 [target.x86_64-pc-windows-msvc]
 rustflags = ["-L", "vendor/vosk"]
+
+[target.x86_64-unknown-linux-gnu]
+rustflags = ["-L", "vendor/vosk", "-C", "link-arg=-Wl,-rpath,$ORIGIN"]
