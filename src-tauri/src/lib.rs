@@ -95,7 +95,7 @@ async fn register_agent(app: AppHandle, state: State<'_, AppState>, token: Strin
     }
     debug_log(
         "register", "start",
-        format!("setupTokenFp={}", secret_fingerprint(&setup_token)),
+        format!("api_url={} setupTokenFp={}", config.api_url, secret_fingerprint(&setup_token)),
     );
 
     let response = state.client
@@ -123,7 +123,7 @@ async fn register_agent(app: AppHandle, state: State<'_, AppState>, token: Strin
                     body
                 }
             });
-        return Err(message);
+        return Err(format!("Registration failed against {}: {message}", config.api_url));
     }
 
     let registered = response.json::<RegisterResponse>().await.map_err(|e| e.to_string())?;
@@ -146,7 +146,7 @@ async fn register_agent(app: AppHandle, state: State<'_, AppState>, token: Strin
             .unwrap_or_else(|| {
                 format!("Registered, but backend rejected the new credential: {}", if body.is_empty() { status.to_string() } else { body })
             });
-        return Err(message);
+        return Err(format!("Credential verification failed against {}: {message}", config.api_url));
     }
 
     let mut next = state.config.lock().expect("config mutex");
@@ -167,10 +167,12 @@ async fn register_agent(app: AppHandle, state: State<'_, AppState>, token: Strin
 
 #[tauri::command]
 fn set_command_trust_mode(state: State<AppState>, mode: String) -> Result<AgentConfig, String> {
-    if mode != "ask" && mode != "trusted_coding" { return Err("Unsupported command trust mode.".to_string()); }
+    if mode != "ask" && mode != "trusted_coding" && mode != "all" {
+        return Err("Unsupported command trust mode.".to_string());
+    }
     let mut config = state.config.lock().expect("config mutex");
     config.command_trust_mode = mode;
-    config.always_allow_commands = false;
+    config.always_allow_commands = config.command_trust_mode == "all";
     save_config(&config)?;
     Ok(config.clone())
 }

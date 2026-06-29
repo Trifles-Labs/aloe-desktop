@@ -122,7 +122,7 @@ pub async fn execute_job(app: AppHandle, job: AgentJob) {
     // Commands require explicit approval (or auto-approval if always_allow is set)
     if job.kind == "run_command" || job.kind == "run_local_command" || job.kind == "start_terminal_session" {
         let command = input_string(&job.input, "command").unwrap_or_default();
-        if config.command_trust_mode == "trusted_coding" && trusted_coding_command(&command) {
+        if config.command_trust_mode == "all" || (config.command_trust_mode == "trusted_coding" && trusted_coding_command(&command)) {
             let input_snapshot = job.input.clone();
             let result = if job.kind == "start_terminal_session" {
                 start_terminal_session(&state, config.clone(), job.input.clone()).await

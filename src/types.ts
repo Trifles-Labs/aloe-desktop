@@ -16,6 +16,8 @@ export type RecentAction = {
   output?: unknown;
 };
 
+export type CommandTrustMode = "ask" | "trusted_coding" | "all";
+
 export type AgentConfig = {
   apiUrl: string;
   agentId: string | null;
@@ -27,7 +29,7 @@ export type AgentConfig = {
   socketStatus: string;
   socketError: string | null;
   alwaysAllowCommands: boolean;
-  commandTrustMode: "ask" | "trusted_coding";
+  commandTrustMode: CommandTrustMode;
   runOnStartup: boolean;
   startMinimized: boolean;
   folders: GrantedFolder[];
