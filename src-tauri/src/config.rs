@@ -87,11 +87,13 @@ pub fn load_config() -> AgentConfig {
     }
     if config.command_trust_mode.is_empty() {
         config.command_trust_mode = if config.always_allow_commands {
-            "trusted_coding"
+            "all"
         } else {
             "ask"
         }
         .to_string();
+    } else if !matches!(config.command_trust_mode.as_str(), "ask" | "trusted_coding" | "all") {
+        config.command_trust_mode = "ask".to_string();
     }
     for session in &mut config.terminal_sessions {
         if session.status == "running" {

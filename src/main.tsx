@@ -25,7 +25,7 @@ import UsagePage from "@/app/(app)/app/usage/page";
 import BoardPage from "@/app/(app)/app/board/page";
 import { usePathname } from "next/navigation";
 import { DEFAULT_CONFIG } from "./types";
-import type { AgentConfig, PendingApproval } from "./types";
+import type { AgentConfig, CommandTrustMode, PendingApproval } from "./types";
 import "./web.css";
 
 type DesktopPreferences = { runOnStartup: boolean; startMinimized: boolean };
@@ -174,11 +174,16 @@ function App() {
     }
   };
 
-  const setAlwaysAllow = async (enabled: boolean) => {
+  const setCommandTrustMode = async (mode: CommandTrustMode) => {
     try {
-      const next = await invoke<AgentConfig>("set_command_trust_mode", { mode: enabled ? "trusted_coding" : "ask" });
+      const next = await invoke<AgentConfig>("set_command_trust_mode", { mode });
       setConfig(next);
-      toast(enabled ? "Trusted Coding mode enabled." : "Per-command approval required again.", "info");
+      const message = mode === "all"
+        ? "All command approvals disabled."
+        : mode === "trusted_coding"
+          ? "Trusted Coding mode enabled."
+          : "Per-command approval required again.";
+      toast(message, "info");
     } catch (err) {
       toast(`Setting failed: ${err instanceof Error ? err.message : String(err)}`, "error");
     }
@@ -219,7 +224,7 @@ function App() {
                 <ConnectionPanel config={config} onReset={() => void resetConnection()} />
                 <FoldersPanel folders={config.folders} onAdd={() => void addFolder()} onRemove={(path) => void removeFolder(path)} />
               </div>
-              <div className="mt-5 space-y-5"><ApprovalsPanel config={config} pending={pending} onRefresh={() => void refresh()} onApprove={(jobId, approved) => void approve(jobId, approved)} onToggleAlwaysAllow={(enabled) => void setAlwaysAllow(enabled)} /><ActivityList actions={config.recentActions} /></div>
+              <div className="mt-5 space-y-5"><ApprovalsPanel config={config} pending={pending} onRefresh={() => void refresh()} onApprove={(jobId, approved) => void approve(jobId, approved)} onSetCommandTrustMode={(mode) => void setCommandTrustMode(mode)} /><ActivityList actions={config.recentActions} /></div>
             </div>
             <ToastContainer toasts={toasts} onDismiss={dismiss} />
           </main>
