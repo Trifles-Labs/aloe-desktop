@@ -21,6 +21,12 @@ const navigate = (href: string, replace = false) => {
 
 export const usePathname = () => useSyncExternalStore(subscribe, currentPath, () => "/app/chat");
 
+export const useParams = <T extends Record<string, string | string[] | undefined> = Record<string, string | string[] | undefined>>(): T => {
+  const pathname = useSyncExternalStore(subscribe, currentPath, () => "/app/chat");
+  const match = pathname.match(/^\/app\/chat\/([^/]+)$/);
+  return (match ? { conversationId: decodeURIComponent(match[1]) } : {}) as T;
+};
+
 export const useSearchParams = () => {
   useSyncExternalStore(subscribe, () => window.location.search, () => "");
   return new URLSearchParams(window.location.search);
