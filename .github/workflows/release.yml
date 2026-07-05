@@ -24,7 +24,10 @@ jobs:
 
     runs-on: ${{ matrix.platform }}
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout aloe-desktop
+        uses: actions/checkout@v4
+        with:
+          path: aloe-desktop
 
       - name: Checkout aloe-frontend
         uses: actions/checkout@v4
@@ -32,7 +35,7 @@ jobs:
           repository: Trifles-Labs/aloe-frontend
           ref: main
           token: ${{ secrets.FRONTEND_REPO_TOKEN }}
-          path: ../aloe-frontend
+          path: aloe-frontend
 
       - name: Install Linux dependencies
         if: matrix.platform == 'ubuntu-22.04'
@@ -48,16 +51,17 @@ jobs:
       - name: Rust cache
         uses: Swatinem/rust-cache@v2
         with:
-          workspaces: "src-tauri -> target"
+          workspaces: "aloe-desktop/src-tauri -> target"
 
       - name: Install bun
         uses: oven-sh/setup-bun@v2
 
-      - name: Install frontend dependencies
+      - name: Install aloe-desktop dependencies
+        working-directory: aloe-desktop
         run: bun install --frozen-lockfile
 
       - name: Install aloe-frontend dependencies
-        working-directory: ../aloe-frontend
+        working-directory: aloe-frontend
         run: bun install --frozen-lockfile
 
       - name: Build and release
@@ -67,6 +71,7 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
+          projectPath: aloe-desktop
           tagName: ${{ github.ref_name }}
           releaseName: "Aloe Desktop ${{ github.ref_name }}"
           releaseDraft: true
