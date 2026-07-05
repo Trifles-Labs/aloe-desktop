@@ -21,6 +21,7 @@ import IntegrationsPage from "@/app/(app)/app/integrations/page";
 import MobileLoginPage from "@/app/(app)/app/mobile-login/page";
 import PlansPage from "@/app/(app)/app/plans/page";
 import SettingsPage from "@/app/(app)/app/settings/page";
+import TasksPage from "@/app/(app)/app/tasks/page";
 import UsagePage from "@/app/(app)/app/usage/page";
 import BoardPage from "@/app/(app)/app/board/page";
 import { usePathname } from "next/navigation";
@@ -46,6 +47,7 @@ function DesktopRouter({ desktopPage }: { desktopPage: React.ReactNode }) {
     "/app/mobile-login": <MobileLoginPage />,
     "/app/plans": <PlansPage />,
     "/app/settings": <SettingsPage />,
+    "/app/tasks": <TasksPage />,
     "/app/usage": <UsagePage />,
     "/app/board": <BoardPage />,
     "/app/desktop": desktopPage,
