@@ -4,8 +4,9 @@ Aloe Desktop release build script.
 Follows the process documented in UPDATER.md.
 
 Usage:
-    python build_release.py           # interactive release build
-    python build_release.py 1.2.3     # pass version directly
+    python build_release.py                  # interactive release build
+    python build_release.py 1.2.3            # pass version directly
+    python build_release.py 1.2.3 --push-tag # also commit the bump, tag v1.2.3, and push
 """
 
 import argparse
@@ -147,12 +148,24 @@ def parse_args():
         "--linux-bundles",
         help="Comma-separated Linux bundles to build: deb,rpm,appimage,binary. Default: binary on Arch, deb,rpm elsewhere.",
     )
+    parser.add_argument(
+        "--push-tag",
+        action="store_true",
+        help="Commit the version bump and push a vX.Y.Z tag to GitHub after a successful build.",
+    )
+    parser.add_argument(
+        "--no-push-tag",
+        action="store_true",
+        help="Do not commit/tag/push to GitHub.",
+    )
     args = parser.parse_args()
 
     if args.install and args.no_install:
         parser.error("--install and --no-install cannot be used together")
     if args.copy_frontend and args.no_copy_frontend:
         parser.error("--copy-frontend and --no-copy-frontend cannot be used together")
+    if args.push_tag and args.no_push_tag:
+        parser.error("--push-tag and --no-push-tag cannot be used together")
     try:
         if args.linux_bundles:
             args.linux_bundles = parse_linux_bundles(args.linux_bundles)
@@ -392,6 +405,56 @@ def install_linux_artifact(version: str, linux_bundles: list[str]):
         sys.exit(result.returncode)
 
 
+def git(*args: str, check: bool = True) -> subprocess.CompletedProcess:
+    return subprocess.run(["git", *args], cwd=SCRIPT_DIR, check=check)
+
+
+def git_output(*args: str) -> str:
+    result = subprocess.run(["git", *args], cwd=SCRIPT_DIR, capture_output=True, text=True)
+    return result.stdout.strip()
+
+
+def tag_exists_locally(tag: str) -> bool:
+    result = subprocess.run(
+        ["git", "rev-parse", "-q", "--verify", f"refs/tags/{tag}"],
+        cwd=SCRIPT_DIR, capture_output=True, text=True,
+    )
+    return result.returncode == 0
+
+
+def tag_exists_on_remote(tag: str) -> bool:
+    return bool(git_output("ls-remote", "--tags", "origin", tag))
+
+
+def commit_tag_and_push(version: str, version_changed: bool):
+    tag = f"v{version}"
+
+    if version_changed:
+        git("add", str(TAURI_CONF))
+        if subprocess.run(["git", "diff", "--cached", "--quiet"], cwd=SCRIPT_DIR).returncode != 0:
+            git("commit", "-m", f"chore: bump version to {version}")
+            print(f"  Committed version bump: chore: bump version to {version}")
+
+    branch = git_output("rev-parse", "--abbrev-ref", "HEAD")
+    if git("push", "origin", branch, check=False).returncode != 0:
+        print(f"\nWARNING: failed to push {branch} to origin — push it manually.")
+
+    if tag_exists_locally(tag):
+        print(f"\nWARNING: git tag {tag} already exists locally — not creating it again.")
+    else:
+        git("tag", tag)
+        print(f"  Created git tag {tag}")
+
+    if tag_exists_on_remote(tag):
+        print(f"\nWARNING: tag {tag} already exists on origin — not pushing. Bump the version to release again.")
+        return
+
+    if git("push", "origin", tag, check=False).returncode != 0:
+        print(f"\nWARNING: failed to push tag {tag} to origin.")
+    else:
+        print(f"  Pushed tag {tag} to origin — this triggers the GitHub Actions release workflow.")
+
+
 def main():
     args = parse_args()
     interactive = sys.stdin.isatty()
@@ -431,7 +494,8 @@ def main():
         print(f"ERROR: '{version}' is not valid semver (e.g. 1.2.3)")
         sys.exit(1)
 
-    if version != current_version:
+    version_changed = version != current_version
+    if version_changed:
         conf["version"] = version
         write_conf(conf)
         print(f"  tauri.conf.json updated: {current_version} → {version}")
@@ -523,6 +587,19 @@ def main():
             install_windows_artifact(version)
         else:
             install_linux_artifact(version, args.linux_bundles)
+
+    # ── Tag and push ────────────────────────────────────────────────────────────
+    if args.push_tag:
+        push_tag = True
+    elif args.no_push_tag:
+        push_tag = False
+    elif interactive:
+        push_tag = prompt_yes_no(f"Commit, tag v{version}, and push to GitHub (triggers the release workflow)?", True)
+    else:
+        push_tag = False
+
+    if push_tag:
+        commit_tag_and_push(version, version_changed)
 
     print("\nDone. Follow UPDATER.md → Publishing a release to register it in the dashboard.")
 
