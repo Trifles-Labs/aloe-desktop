@@ -450,8 +450,6 @@ pub fn run() {
             tauri::async_runtime::spawn(async move {
                 socket::socket_loop(handle).await;
             });
-            let window = app.get_webview_window("main").unwrap();
-            window.open_devtools();
             Ok(())
         })
         .on_menu_event(|app, event| desktop::handle_menu_event(app, event.id().as_ref()))
