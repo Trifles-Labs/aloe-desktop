@@ -1,18 +1,31 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 fn main() {
-    // WebKitGTK's DMA-BUF/GBM compositing path is unreliable against the proprietary
-    // NVIDIA driver on Intel+NVIDIA hybrid-graphics laptops: it's a fatal Wayland
-    // protocol error natively ("Gdk-Message: Error 71"), or a silently blank window
-    // (failed GBM buffer allocation) if GTK is forced onto X11 instead. Pinning the
-    // render device to the Intel GPU (via the undocumented
-    // WEBKIT_WEB_RENDER_DEVICE_FILE) avoids it sometimes, but proved flaky under
-    // repeated testing — so fall back to WebKit's software renderer, which is the
-    // workaround WebKitGTK itself recommends for this class of NVIDIA bug.
     #[cfg(target_os = "linux")]
-    if std::env::var_os("WEBKIT_DISABLE_DMABUF_RENDERER").is_none() {
-        std::env::set_var("WEBKIT_DISABLE_DMABUF_RENDERER", "1");
-    }
+    enable_wayland_software_rendering();
 
     aloe_desktop_lib::run();
+}
+
+#[cfg(target_os = "linux")]
+fn enable_wayland_software_rendering() {
+    if !is_wayland_session() {
+        return;
+    }
+
+    // WebKitGTK's DMA-BUF/GBM compositing path can be unreliable on Wayland,
+    // especially with proprietary NVIDIA and hybrid graphics drivers. This env
+    // var must be set before WebKit initializes, so do it before Tauri starts.
+    std::env::set_var("WEBKIT_DISABLE_DMABUF_RENDERER", "1");
+    std::env::set_var("ALOE_SOFTWARE_RENDERING_ALERT", "1");
+}
+
+#[cfg(target_os = "linux")]
+fn is_wayland_session() -> bool {
+    std::env::var("XDG_SESSION_TYPE")
+        .map(|session_type| session_type.eq_ignore_ascii_case("wayland"))
+        .unwrap_or(false)
+        || std::env::var_os("WAYLAND_DISPLAY")
+            .filter(|display| !display.is_empty())
+            .is_some()
 }
