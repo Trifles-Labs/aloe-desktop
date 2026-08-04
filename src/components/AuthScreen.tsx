@@ -11,28 +11,28 @@ export function AuthScreen({ setupToken, onTokenChange, onConnect }: Props) {
   return (
     <div className="flex min-h-full items-center justify-center px-6 py-10">
       <div className="liquid-glass w-full max-w-md rounded-3xl p-6 sm:p-8">
-        <div className="flex items-center gap-3 border-b border-[#e1e7d7] pb-6 dark:border-[#2a3a28]">
+        <div className="flex items-center gap-3 border-b border-edge pb-6">
           <div className="brand-mark h-11 w-11">
             <Leaf className="h-5 w-5" />
           </div>
           <div>
             <p className="eyebrow">Get started</p>
-            <p className="mt-1 font-display text-lg font-semibold text-[#0b3026] dark:text-[#e8f0e0]">Connect to Aloe</p>
+            <p className="mt-1 font-display text-lg font-semibold text-ink">Connect to Aloe</p>
           </div>
         </div>
 
-        <p className="mt-6 text-sm leading-6 text-[#506257] dark:text-[#8aaa90]">
+        <p className="mt-6 text-sm leading-6 text-ink-soft">
           Paste your setup token from the Aloe Integrations page to register this device.
         </p>
 
         <label className="mt-5 block">
-          <span className="text-xs font-semibold uppercase tracking-wide text-[#506257] dark:text-[#8aaa90]">Setup token</span>
+          <span className="text-xs font-semibold uppercase tracking-wide text-ink-soft">Setup token</span>
           <textarea
             value={setupToken}
             onChange={(e) => onTokenChange(e.target.value)}
             placeholder="Paste the setup token from Aloe Integrations…"
             rows={5}
-            className="mt-2 w-full resize-none rounded-2xl border border-[#d9e0d5] bg-white/70 px-3.5 py-3 text-sm font-medium text-[#0b3026] outline-none transition-colors placeholder:text-[#8a9a84] focus:border-[#6f8747] focus:ring-2 focus:ring-[#c9d8b6] dark:border-[#2a3a28] dark:bg-[#1c2a20] dark:text-[#e8f0e0] dark:placeholder:text-[#6a8870] dark:focus:ring-[#2a3d22]"
+            className="mt-2 w-full resize-none rounded-2xl border border-edge bg-surface-strong px-3.5 py-3 text-sm font-medium text-ink outline-none transition-colors placeholder:text-ink-soft/60 focus:border-moss focus:ring-2 focus:ring-moss/25"
           />
         </label>
 
@@ -46,8 +46,8 @@ export function AuthScreen({ setupToken, onTokenChange, onConnect }: Props) {
           Log in with setup token
         </button>
 
-        <div className="mt-6 flex items-center gap-2 rounded-2xl border border-[#dfe6d2] bg-[#dfe9d2]/70 px-4 py-3 text-xs text-[#506257] dark:border-[#2a3d22] dark:bg-[#2a3d22]/40 dark:text-[#8aaa90]">
-          <ShieldCheck className="h-4 w-4 text-[#0b3026] dark:text-[#8faa5f]" />
+        <div className="mt-6 flex items-center gap-2 rounded-2xl border border-edge bg-sage-soft px-4 py-3 text-xs text-ink-soft">
+          <ShieldCheck className="h-4 w-4 text-moss" />
           Your token stays on this device and is never shared.
         </div>
       </div>

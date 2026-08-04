@@ -200,12 +200,12 @@ function App() {
         {updateReady && (
           <div
             role="status"
-            className="flex items-center justify-between gap-3 bg-[#d4eedc] px-4 py-2 text-sm font-medium text-[#1a4d2e] dark:bg-[#1e3a28] dark:text-[#7ecb99]"
+            className="flex items-center justify-between gap-3 bg-sage-soft px-4 py-2 text-sm font-medium text-moss"
           >
             <span>A new version of Aloe Desktop has been downloaded and is ready to install.</span>
             <button
               onClick={() => void restart()}
-              className="rounded-md bg-[#2d7a4f] px-3 py-1 text-xs font-semibold text-white hover:bg-[#246040]"
+              className="rounded-md bg-pine px-3 py-1 text-xs font-semibold text-cream hover:bg-pine-hover"
             >
               Restart now
             </button>
@@ -214,14 +214,14 @@ function App() {
         <div className="relative min-h-0 flex-1 contain-[layout]"><Providers>
           <DesktopRouter desktopPage={
           <main className="relative h-full overflow-y-auto">
-            <div className="pointer-events-none absolute right-8 top-8 text-[#6f8747] opacity-[0.05]"><Leaf className="h-52 w-52 rotate-12" /></div>
+            <div className="pointer-events-none absolute right-8 top-8 text-moss opacity-[0.05]"><Leaf className="h-52 w-52 rotate-12" /></div>
             <div className="relative mx-auto max-w-6xl px-4 py-8 sm:px-6 lg:px-8 lg:py-10">
               <header className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
-                <div><p className="eyebrow">Aloe Desktop</p><h1 className="mt-2 font-display text-3xl font-semibold text-[#0b3026] dark:text-[#e8f0e0] sm:text-4xl">Desktop controls</h1><p className="mt-2 max-w-2xl text-sm leading-6 text-[#506257] dark:text-[#8aaa90]">Manage the local agent, folder access, command approvals, and recent activity.</p></div>
-                <div className={`inline-flex w-fit items-center gap-2 rounded-full border px-3 py-2 text-xs font-semibold ${connected ? "border-[#c9d8b6] bg-[#edf4e7] text-[#4d6c35] dark:border-[#38502e] dark:bg-[#213225] dark:text-[#9fbd7a]" : "border-[#e3c1b8] bg-[#fff1ed] text-[#a65345] dark:border-[#5a3a32] dark:bg-[#33211d] dark:text-[#e8917f]"}`}><span className={`h-2 w-2 rounded-full ${connected ? "bg-[#4f8a47]" : "bg-[#b86d5f]"}`} /><MonitorCheck className="h-4 w-4" />{connected ? "Agent connected" : config.socketStatus || "Disconnected"}</div>
+                <div><p className="eyebrow">Aloe Desktop</p><h1 className="mt-2 font-display text-3xl font-semibold text-ink sm:text-4xl">Desktop controls</h1><p className="mt-2 max-w-2xl text-sm leading-6 text-ink-soft">Manage the local agent, folder access, command approvals, and recent activity.</p></div>
+                <div className={`inline-flex w-fit items-center gap-2 rounded-full px-3 py-1 text-xs font-semibold backdrop-blur-sm ${connected ? "bg-sage/80 text-ink" : "bg-black/4 dark:bg-white/6 text-ink-soft/80"}`}><span className={`h-2 w-2 rounded-full ${connected ? "bg-moss watch-pulse" : "bg-ink-soft/40"}`} /><MonitorCheck className="h-4 w-4" />{connected ? "Agent connected" : config.socketStatus || "Disconnected"}</div>
               </header>
 
-              {!connected ? <div className="mt-6 rounded-2xl border border-[#e3c1b8] bg-[#fff4f1] px-4 py-3 text-sm text-[#8a4035] dark:border-[#5a3a32] dark:bg-[#2a1f1c] dark:text-[#e8917f]">The local agent is {config.socketStatus || "disconnected"}.{config.socketError ? ` ${config.socketError}` : ""}</div> : null}
+              {!connected ? <div className="mt-6 rounded-2xl border border-clay/40 bg-clay/8 px-4 py-3 text-sm text-danger">The local agent is {config.socketStatus || "disconnected"}.{config.socketError ? ` ${config.socketError}` : ""}</div> : null}
               <div className="mt-8 grid gap-5 lg:grid-cols-2">
                 <ConnectionPanel config={config} onReset={() => void resetConnection()} />
                 <FoldersPanel folders={config.folders} onAdd={() => void addFolder()} onRemove={(path) => void removeFolder(path)} />
@@ -240,17 +240,17 @@ function App() {
     <div className="flex h-screen flex-col overflow-hidden">
       <DesktopTitleBar />
       <ThemeProvider attribute="class" defaultTheme="system" enableSystem disableTransitionOnChange>
-        <main className="relative flex min-h-0 flex-1 flex-col overflow-y-auto bg-[#f8f5e9] dark:bg-[#0e1a13]">
+        <main className="relative flex min-h-0 flex-1 flex-col overflow-y-auto bg-canvas">
           {/* Botanical background decorations */}
-          <div className="pointer-events-none absolute right-8 top-8 z-0 text-[#6f8747] opacity-[0.06]"><Leaf className="h-28 w-28 rotate-20" /></div>
-          <div className="pointer-events-none absolute bottom-14 left-4 z-0 text-[#d98f82] opacity-[0.08]"><ButterflyDecor style={{ width: 80, height: 56 }} /></div>
-          <div className="pointer-events-none absolute bottom-10 right-14 z-0 text-[#6f8747] opacity-[0.06]"><Flower2 className="h-16 w-16 rotate-15" /></div>
+          <div className="pointer-events-none absolute right-8 top-8 z-0 text-moss opacity-[0.06]"><Leaf className="h-28 w-28 rotate-20" /></div>
+          <div className="pointer-events-none absolute bottom-14 left-4 z-0 text-blush opacity-[0.08]"><ButterflyDecor style={{ width: 80, height: 56 }} /></div>
+          <div className="pointer-events-none absolute bottom-10 right-14 z-0 text-moss opacity-[0.06]"><Flower2 className="h-16 w-16 rotate-15" /></div>
 
           <div className="relative z-10 flex items-center gap-3 px-6 pt-8 sm:px-10">
             <div className="brand-mark h-9 w-9"><Leaf className="h-4 w-4" /></div>
             <div>
               <p className="eyebrow">Aloe Desktop</p>
-              <h1 className="mt-0.5 font-display text-xl font-semibold text-[#0b3026] dark:text-[#e8f0e0]">Local agent</h1>
+              <h1 className="mt-0.5 font-display text-xl font-semibold text-ink">Local agent</h1>
             </div>
           </div>
 
