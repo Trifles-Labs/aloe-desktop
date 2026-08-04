@@ -24,6 +24,9 @@ import SettingsPage from "@/app/(app)/app/settings/page";
 import TasksPage from "@/app/(app)/app/tasks/page";
 import UsagePage from "@/app/(app)/app/usage/page";
 import BoardPage from "@/app/(app)/app/board/page";
+import ApprovalsPage from "@/app/(app)/app/approvals/page";
+import MemoryPage from "@/app/(app)/app/memory/page";
+import McpPage from "@/app/(app)/app/mcp/page";
 import { usePathname } from "next/navigation";
 import { DEFAULT_CONFIG } from "./types";
 import type { AgentConfig, CommandTrustMode, PendingApproval } from "./types";
@@ -50,6 +53,9 @@ function DesktopRouter({ desktopPage }: { desktopPage: React.ReactNode }) {
     "/app/tasks": <TasksPage />,
     "/app/usage": <UsagePage />,
     "/app/board": <BoardPage />,
+    "/app/approvals": <ApprovalsPage />,
+    "/app/memory": <MemoryPage />,
+    "/app/mcp": <McpPage />,
     "/app/desktop": desktopPage,
   };
 
