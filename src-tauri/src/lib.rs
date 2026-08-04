@@ -5,6 +5,7 @@ mod fs;
 mod models;
 mod notifications;
 mod search;
+mod shell;
 mod socket;
 mod terminal;
 

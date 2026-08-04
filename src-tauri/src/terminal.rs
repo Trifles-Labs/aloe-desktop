@@ -15,20 +15,10 @@ use crate::{
     config::{save_config, AppState, COMMAND_TIMEOUT_SECONDS},
     fs::{assert_granted, input_string, truncate_text},
     models::{AgentConfig, PersistedTerminalSession},
+    shell::{build_shell_command, hide_command_window},
 };
 
 const MAX_BUFFER_BYTES: usize = 128_000;
-
-#[cfg(target_os = "windows")]
-const CREATE_NO_WINDOW: u32 = 0x08000000;
-
-#[cfg(target_os = "windows")]
-fn hide_command_window(command: &mut Command) {
-    command.creation_flags(CREATE_NO_WINDOW);
-}
-
-#[cfg(not(target_os = "windows"))]
-fn hide_command_window(_command: &mut Command) {}
 
 #[derive(Clone)]
 pub struct TerminalSession {
@@ -78,15 +68,7 @@ pub async fn start_terminal_session(
     let command = input_string(&input, "command")?;
     let session_id = Uuid::new_v4().to_string();
 
-    let mut process = if cfg!(target_os = "windows") {
-        let mut cmd = Command::new("cmd");
-        cmd.arg("/C").arg(&command);
-        cmd
-    } else {
-        let mut cmd = Command::new("sh");
-        cmd.arg("-lc").arg(&command);
-        cmd
-    };
+    let mut process = build_shell_command(&command);
     process
         .current_dir(&cwd)
         .stdin(Stdio::piped())

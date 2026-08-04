@@ -12,21 +12,11 @@ use crate::fs::{
 use crate::models::{AgentConfig, AgentJob, PendingApproval};
 use crate::notifications;
 use crate::search::search_codebase;
+use crate::shell::{build_shell_command, hide_command_window};
 use crate::terminal::{
     list_terminal_sessions, read_terminal_session, start_terminal_session, stop_terminal_session, wait_terminal_session,
     write_terminal_session,
 };
-
-#[cfg(target_os = "windows")]
-const CREATE_NO_WINDOW: u32 = 0x08000000;
-
-#[cfg(target_os = "windows")]
-fn hide_command_window(command: &mut Command) {
-    command.creation_flags(CREATE_NO_WINDOW);
-}
-
-#[cfg(not(target_os = "windows"))]
-fn hide_command_window(_command: &mut Command) {}
 
 fn trusted_coding_command(command: &str) -> bool {
     let normalized = command.trim().to_lowercase();
@@ -61,15 +51,7 @@ pub async fn run_command(config: AgentConfig, input: Value) -> Result<Value, Str
     let cwd = assert_granted(&config, &input_string(&input, "cwd")?)?;
     let command = input_string(&input, "command")?;
 
-    let mut process = if cfg!(target_os = "windows") {
-        let mut cmd = Command::new("cmd");
-        cmd.arg("/C").arg(&command);
-        cmd
-    } else {
-        let mut cmd = Command::new("sh");
-        cmd.arg("-lc").arg(&command);
-        cmd
-    };
+    let mut process = build_shell_command(&command);
     process.current_dir(&cwd).stdout(Stdio::piped()).stderr(Stdio::piped());
     hide_command_window(&mut process);
 
