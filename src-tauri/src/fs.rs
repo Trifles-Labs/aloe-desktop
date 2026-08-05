@@ -157,11 +157,54 @@ pub fn create_file(config: &AgentConfig, input: &Value) -> Result<Value, String>
     Ok(json!({ "path": path.to_string_lossy(), "created": true }))
 }
 
+// Exact-match find/replace, the same contract as an editor's find/replace: oldString must match
+// the file's current text byte-for-byte and be unique unless replaceAll is set. This intentionally
+// does not fall back to a full-content overwrite — a missing/ambiguous oldString is a real error
+// the caller (the model) needs to see and correct by re-reading the file, not something to guess
+// past silently.
 pub fn update_file(config: &AgentConfig, input: &Value) -> Result<Value, String> {
     let path = assert_granted(config, &input_string(input, "path")?)?;
     assert_safe_write(&path)?;
-    fs::write(&path, input_string(input, "content")?).map_err(|e| e.to_string())?;
-    Ok(json!({ "path": path.to_string_lossy(), "written": true }))
+
+    let old_string = input_string(input, "oldString")?;
+    let new_string = input_string(input, "newString")?;
+    let replace_all = input.get("replaceAll").and_then(Value::as_bool).unwrap_or(false);
+
+    if old_string.is_empty() {
+        return Err("oldString cannot be empty.".to_string());
+    }
+    if old_string == new_string {
+        return Err("oldString and newString are identical — nothing to change.".to_string());
+    }
+
+    let content = fs::read_to_string(&path).map_err(|e| e.to_string())?;
+    let occurrences = content.matches(old_string.as_str()).count();
+
+    if occurrences == 0 {
+        return Err(format!(
+            "oldString was not found in {} — it must match the file's current text exactly, including whitespace and indentation. Read the file again to get an accurate snippet.",
+            path.display()
+        ));
+    }
+    if occurrences > 1 && !replace_all {
+        return Err(format!(
+            "oldString matches {occurrences} places in {} — include more surrounding context to make it unique, or set replaceAll to true to change every occurrence.",
+            path.display()
+        ));
+    }
+
+    let updated = if replace_all {
+        content.replace(old_string.as_str(), new_string.as_str())
+    } else {
+        content.replacen(old_string.as_str(), new_string.as_str(), 1)
+    };
+
+    fs::write(&path, &updated).map_err(|e| e.to_string())?;
+    Ok(json!({
+        "path": path.to_string_lossy(),
+        "written": true,
+        "replacements": if replace_all { occurrences } else { 1 },
+    }))
 }
 
 pub fn delete_file(config: &AgentConfig, input: &Value) -> Result<Value, String> {
@@ -268,4 +311,128 @@ pub fn truncate_text(value: String) -> Value {
         end -= 1;
     }
     json!({ "content": &value[..end], "truncated": true })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::models::GrantedFolder;
+
+    fn temp_project(name: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("aloe_fs_test_{name}_{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).expect("create temp project dir");
+        fs::canonicalize(&dir).expect("canonicalize temp project dir")
+    }
+
+    fn config_granting(dir: &Path) -> AgentConfig {
+        AgentConfig {
+            folders: vec![GrantedFolder { path: dir.to_string_lossy().to_string(), label: None, indexed_at: None }],
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn update_file_replaces_a_unique_match() {
+        let dir = temp_project("unique");
+        let file = dir.join("a.txt");
+        fs::write(&file, "hello world").unwrap();
+        let config = config_granting(&dir);
+
+        let result = update_file(&config, &json!({
+            "path": file.to_string_lossy(),
+            "oldString": "world",
+            "newString": "there",
+        })).expect("update_file should succeed");
+
+        assert_eq!(fs::read_to_string(&file).unwrap(), "hello there");
+        assert_eq!(result["replacements"], 1);
+    }
+
+    #[test]
+    fn update_file_errors_when_old_string_is_missing() {
+        let dir = temp_project("missing");
+        let file = dir.join("a.txt");
+        fs::write(&file, "hello world").unwrap();
+        let config = config_granting(&dir);
+
+        let err = update_file(&config, &json!({
+            "path": file.to_string_lossy(),
+            "oldString": "goodbye",
+            "newString": "hi",
+        })).unwrap_err();
+
+        assert!(err.contains("was not found"), "unexpected error: {err}");
+        // A failed match must never touch the file.
+        assert_eq!(fs::read_to_string(&file).unwrap(), "hello world");
+    }
+
+    #[test]
+    fn update_file_errors_when_old_string_is_ambiguous_without_replace_all() {
+        let dir = temp_project("ambiguous");
+        let file = dir.join("a.txt");
+        fs::write(&file, "foo foo foo").unwrap();
+        let config = config_granting(&dir);
+
+        let err = update_file(&config, &json!({
+            "path": file.to_string_lossy(),
+            "oldString": "foo",
+            "newString": "bar",
+        })).unwrap_err();
+
+        assert!(err.contains("matches 3 places"), "unexpected error: {err}");
+        assert_eq!(fs::read_to_string(&file).unwrap(), "foo foo foo");
+    }
+
+    #[test]
+    fn update_file_replace_all_changes_every_occurrence() {
+        let dir = temp_project("replace_all");
+        let file = dir.join("a.txt");
+        fs::write(&file, "foo foo foo").unwrap();
+        let config = config_granting(&dir);
+
+        let result = update_file(&config, &json!({
+            "path": file.to_string_lossy(),
+            "oldString": "foo",
+            "newString": "bar",
+            "replaceAll": true,
+        })).expect("update_file should succeed");
+
+        assert_eq!(fs::read_to_string(&file).unwrap(), "bar bar bar");
+        assert_eq!(result["replacements"], 3);
+    }
+
+    #[test]
+    fn update_file_rejects_identical_old_and_new_strings() {
+        let dir = temp_project("identical");
+        let file = dir.join("a.txt");
+        fs::write(&file, "hello world").unwrap();
+        let config = config_granting(&dir);
+
+        let err = update_file(&config, &json!({
+            "path": file.to_string_lossy(),
+            "oldString": "world",
+            "newString": "world",
+        })).unwrap_err();
+
+        assert!(err.contains("identical"), "unexpected error: {err}");
+    }
+
+    #[test]
+    fn update_file_rejects_writes_outside_granted_folders() {
+        let granted = temp_project("granted");
+        let outside = temp_project("outside");
+        let file = outside.join("a.txt");
+        fs::write(&file, "hello world").unwrap();
+        let config = config_granting(&granted);
+
+        let err = update_file(&config, &json!({
+            "path": file.to_string_lossy(),
+            "oldString": "world",
+            "newString": "there",
+        })).unwrap_err();
+
+        assert!(err.contains("outside"), "unexpected error: {err}");
+        assert_eq!(fs::read_to_string(&file).unwrap(), "hello world");
+    }
 }
