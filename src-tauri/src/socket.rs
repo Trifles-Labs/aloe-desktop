@@ -12,8 +12,8 @@ use crate::config::{
     debug_log, normalize_api_url, save_config, secret_fingerprint, AppState,
     SOCKET_HEARTBEAT_MS, SOCKET_RECONNECT_MAX_MS,
 };
-use crate::executor::execute_job;
-use crate::models::{AgentConfig, JobList, SocketJobMessage};
+use crate::executor::{execute_job, resolve_pending_approval};
+use crate::models::{AgentConfig, JobDecisionMessage, JobList, SocketJobMessage};
 
 // ── Socket state helpers ──────────────────────────────────────────────────────
 
@@ -153,6 +153,14 @@ async fn run_connected_loop(
     let mut heartbeat = tokio::time::interval(Duration::from_millis(SOCKET_HEARTBEAT_MS));
     heartbeat.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
 
+    // Lets code outside this loop (queue_for_approval, on the executor side) push a message onto
+    // this specific live connection — e.g. syncing a newly queued local-command approval to the
+    // backend. Once this function returns, `outbound_rx` drops and any further send on the
+    // stored sender simply fails (silently, by design — see queue_for_approval) until the next
+    // connection replaces it.
+    let (outbound_tx, mut outbound_rx) = tokio::sync::mpsc::unbounded_channel();
+    *app.state::<AppState>().outbound.lock().expect("outbound mutex") = Some(outbound_tx);
+
     loop {
         tokio::select! {
             _ = heartbeat.tick() => {
@@ -169,6 +177,12 @@ async fn run_connected_loop(
                     return;
                 }
             }
+            Some(message) = outbound_rx.recv() => {
+                if write.send(message).await.is_err() {
+                    set_socket_state(app, "reconnecting", Some("Send failed.".to_string()));
+                    return;
+                }
+            }
             next = read.next() => {
                 let Some(Ok(message)) = next else {
                     set_socket_state(app, "reconnecting", Some("WebSocket closed.".to_string()));
@@ -177,18 +191,30 @@ async fn run_connected_loop(
                 if !message.is_text() {
                     continue;
                 }
-                let Ok(payload) = serde_json::from_str::<SocketJobMessage>(
-                    message.to_text().unwrap_or_default()
-                ) else {
+                let text = message.to_text().unwrap_or_default();
+                let Ok(payload) = serde_json::from_str::<SocketJobMessage>(text) else {
                     continue;
                 };
-                if payload.kind != "job_request" {
-                    continue;
-                }
-                if let Some(job) = payload.job {
-                    debug_log("socket", "job_request", format!("job_id={} kind={}", job.id, job.kind));
-                    let handle = app.clone();
-                    tokio::spawn(async move { execute_job(handle, job).await; });
+                match payload.kind.as_str() {
+                    "job_request" => {
+                        if let Some(job) = payload.job {
+                            debug_log("socket", "job_request", format!("job_id={} kind={}", job.id, job.kind));
+                            let handle = app.clone();
+                            tokio::spawn(async move { execute_job(handle, job).await; });
+                        }
+                    }
+                    "job_decision" => {
+                        if let Ok(decision) = serde_json::from_str::<JobDecisionMessage>(text) {
+                            debug_log("socket", "job_decision", format!("job_id={} approved={}", decision.job_id, decision.approved));
+                            let handle = app.clone();
+                            tokio::spawn(async move {
+                                if let Err(e) = resolve_pending_approval(&handle, &decision.job_id, decision.approved).await {
+                                    debug_log("socket", "job_decision_error", format!("job_id={} err={e}", decision.job_id));
+                                }
+                            });
+                        }
+                    }
+                    _ => {}
                 }
             }
         }

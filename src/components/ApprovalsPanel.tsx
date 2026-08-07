@@ -1,12 +1,12 @@
 import React from "react";
-import { CheckCircle2, Play, RefreshCw, ShieldAlert, ShieldCheck, X } from "lucide-react";
+import Link from "next/link";
+import { ArrowUpRight, CheckCircle2, RefreshCw, ShieldAlert, ShieldCheck } from "lucide-react";
 import type { AgentConfig, CommandTrustMode, PendingApproval } from "../types";
 
 type Props = {
   config: AgentConfig;
   pending: PendingApproval[];
   onRefresh: () => void;
-  onApprove: (jobId: string, approved: boolean) => void;
   onSetCommandTrustMode: (mode: CommandTrustMode) => void;
 };
 
@@ -28,7 +28,7 @@ const commandModes: Array<{ mode: CommandTrustMode; title: string; description: 
   },
 ];
 
-export function ApprovalsPanel({ config, pending, onRefresh, onApprove, onSetCommandTrustMode }: Props) {
+export function ApprovalsPanel({ config, pending, onRefresh, onSetCommandTrustMode }: Props) {
   return (
     <section className="liquid-glass rounded-3xl p-5 sm:p-6">
       <div className="flex items-center justify-between gap-4">
@@ -51,21 +51,24 @@ export function ApprovalsPanel({ config, pending, onRefresh, onApprove, onSetCom
         })}
       </div>
 
-      <div className="mt-4 space-y-3">
+      {/* Pending local-command approvals now live in the same queue as email/calendar/GitHub
+          actions — /app/approvals is the one place to decide on any of them, from either this
+          device or the web. This panel stays for trust-mode config and an offline fallback note. */}
+      <div className="mt-4">
         {pending.length === 0 ? (
           <div className="rounded-2xl border border-dashed border-edge p-6 text-center">
             {config.commandTrustMode === "all" ? <ShieldAlert className="mx-auto h-7 w-7 text-gold" /> : config.commandTrustMode === "trusted_coding" ? <ShieldCheck className="mx-auto h-7 w-7 text-moss" /> : <CheckCircle2 className="mx-auto h-7 w-7 text-moss" />}
             <p className="mt-2 text-sm font-medium text-ink-soft">{config.commandTrustMode === "all" ? "All command requests can run automatically." : config.commandTrustMode === "trusted_coding" ? "Recognized coding commands can run automatically." : "Nothing waiting for approval."}</p>
           </div>
-        ) : null}
-        {pending.map((item) => (
-          <article className="rounded-2xl border border-edge bg-sage-soft p-4" key={item.jobId}>
-            <p className="text-sm font-semibold text-ink">{item.reason}</p>
-            <code className="mt-3 block overflow-x-auto rounded-xl bg-surface-strong px-3 py-2 text-xs text-ink">{item.command}</code>
-            <p className="mt-2 truncate text-xs text-ink-soft">{item.cwd}</p>
-            <div className="mt-4 flex gap-2"><button className="primary-button min-h-0 px-4 py-2 text-xs" onClick={() => onApprove(item.jobId, true)}><Play className="h-3.5 w-3.5" />Run</button><button className="secondary-button min-h-0 px-4 py-2 text-xs" onClick={() => onApprove(item.jobId, false)}><X className="h-3.5 w-3.5" />Deny</button></div>
-          </article>
-        ))}
+        ) : (
+          <Link href="/app/approvals" className="flex items-center justify-between gap-3 rounded-2xl border border-edge bg-sage-soft p-4 transition hover:border-moss/50">
+            <span>
+              <strong className="block text-sm text-ink">{pending.length} command{pending.length === 1 ? "" : "s"} waiting on you</strong>
+              <small className="mt-1 block text-xs leading-5 text-ink-soft">Review and decide in the approvals queue.</small>
+            </span>
+            <ArrowUpRight className="h-4 w-4 shrink-0 text-moss" />
+          </Link>
+        )}
       </div>
     </section>
   );

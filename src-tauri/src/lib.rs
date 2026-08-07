@@ -19,13 +19,10 @@ use tauri_plugin_dialog::MessageDialogKind;
 use tauri_plugin_opener::OpenerExt;
 
 use config::{
-    add_recent, debug_log, load_config, make_granted_folder, normalize_setup_token, save_config,
+    debug_log, load_config, make_granted_folder, normalize_setup_token, save_config,
     secret_fingerprint, AppState,
 };
-use executor::{dispatch_tool, post_result};
-use models::{
-    AgentConfig, AgentJob, ErrorResponse, PendingApproval, RegisterResponse, SearchMatch,
-};
+use models::{AgentConfig, ErrorResponse, PendingApproval, RegisterResponse, SearchMatch};
 use search::{search_content as search_content_fn, search_files as search_files_fn};
 use socket::{clear_agent_credentials, sync_folders_with_config};
 
@@ -279,69 +276,8 @@ async fn remove_folder(state: State<'_, AppState>, path: String) -> Result<Agent
 // ── Command approval ──────────────────────────────────────────────────────────
 
 #[tauri::command]
-async fn approve_command(
-    app: AppHandle,
-    state: State<'_, AppState>,
-    job_id: String,
-    approved: bool,
-) -> Result<(), String> {
-    let pending = {
-        let mut list = state.pending.lock().expect("pending mutex");
-        let idx = list
-            .iter()
-            .position(|i| i.job_id == job_id)
-            .ok_or("Approval request not found.")?;
-        list.remove(idx)
-    };
-    let config = state.config.lock().expect("config mutex").clone();
-
-    if !approved {
-        post_result(
-            &state,
-            &config,
-            &pending.job_id,
-            "denied",
-            None,
-            Some("User denied command.".to_string()),
-        )
-        .await;
-        return Ok(());
-    }
-
-    let input_val = pending.input.clone();
-    let job = AgentJob {
-        id: pending.job_id.clone(),
-        kind: pending.job_kind.clone(),
-        input: input_val.clone(),
-    };
-    let result = dispatch_tool(&app, &state, &config, &job).await;
-    let (status, output, error) = match result {
-        Ok(v) => ("completed", Some(v), None),
-        Err(m) => ("failed", None, Some(m)),
-    };
-    post_result(
-        &state,
-        &config,
-        &pending.job_id,
-        status,
-        output.clone(),
-        error.clone(),
-    )
-    .await;
-    {
-        let mut cfg = state.config.lock().expect("config mutex");
-        add_recent(
-            &mut cfg,
-            &pending.job_id,
-            &pending.job_kind,
-            status,
-            error.as_deref().unwrap_or("Completed"),
-            Some(input_val),
-            output,
-        );
-        let _ = save_config(&cfg);
-    }
-    Ok(())
+async fn approve_command(app: AppHandle, job_id: String, approved: bool) -> Result<(), String> {
+    executor::resolve_pending_approval(&app, &job_id, approved).await
 }
 
 // ── Search commands ───────────────────────────────────────────────────────────
@@ -402,6 +338,7 @@ pub fn run() {
             pending: Mutex::new(Vec::new()),
             terminals: Mutex::new(HashMap::new()),
             client: reqwest::Client::new(),
+            outbound: Mutex::new(None),
         })
         .invoke_handler(tauri::generate_handler![
             get_config,

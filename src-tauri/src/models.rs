@@ -111,6 +111,15 @@ pub struct SocketJobMessage {
     pub job: Option<AgentJob>,
 }
 
+/// Backend relaying a web/desktop-queue approval decision back down to this agent —
+/// see `job_decision` in aloe-backend's agent_connections.ts.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct JobDecisionMessage {
+    pub job_id: String,
+    pub approved: bool,
+}
+
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SearchMatch {

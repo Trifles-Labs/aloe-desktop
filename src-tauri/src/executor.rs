@@ -3,6 +3,7 @@ use serde_json::{json, Value};
 use std::{process::Stdio, time::Duration};
 use tauri::{AppHandle, Emitter, Manager};
 use tokio::process::Command;
+use tokio_tungstenite::tungstenite::Message;
 
 use crate::config::{add_recent, debug_log, save_config, AppState, COMMAND_TIMEOUT_SECONDS};
 use crate::fs::{
@@ -164,8 +165,57 @@ fn queue_for_approval(state: &tauri::State<AppState>, app: &AppHandle, job: Agen
         input: job.input,
     };
     debug_log("job", "approval_queued", format!("job_id={} kind={}", job.id, job.kind));
+
+    // Mirrors this into the backend's approval queue, so it shows up in the web /app/approvals
+    // page alongside email/calendar/GitHub actions — not just in this device's own panel.
+    // Best-effort: if the socket isn't up right now, the row simply doesn't exist remotely yet.
+    if let Some(sender) = state.outbound.lock().expect("outbound mutex").as_ref() {
+        let sync_message = json!({
+            "type": "approval_requested",
+            "jobId": pending.job_id.clone(),
+            "reason": pending.reason.clone(),
+            "command": pending.command.clone(),
+            "cwd": pending.cwd.clone(),
+        });
+        let _ = sender.send(Message::Text(sync_message.to_string().into()));
+    }
+
     state.pending.lock().expect("pending mutex").push(pending);
     let _ = app.emit("agent://pending-approval", ());
+}
+
+/// Resolves one pending command approval, whether the decision came from this device's own
+/// approvals panel or was relayed down from the backend after a decision on the web queue
+/// (see the `job_decision` branch in socket.rs). Both paths converge here so there is exactly
+/// one place that clears `state.pending`, dispatches the command, and posts the result.
+pub async fn resolve_pending_approval(app: &AppHandle, job_id: &str, approved: bool) -> Result<(), String> {
+    let state = app.state::<AppState>();
+    let pending = {
+        let mut list = state.pending.lock().expect("pending mutex");
+        let idx = list
+            .iter()
+            .position(|i| i.job_id == job_id)
+            .ok_or("Approval request not found.")?;
+        list.remove(idx)
+    };
+    let config = state.config.lock().expect("config mutex").clone();
+
+    if !approved {
+        post_result(&state, &config, &pending.job_id, "denied", None, Some("User denied command.".to_string())).await;
+        return Ok(());
+    }
+
+    let input_val = pending.input.clone();
+    let job = AgentJob {
+        id: pending.job_id.clone(),
+        kind: pending.job_kind.clone(),
+        input: input_val.clone(),
+    };
+    let result = dispatch_tool(app, &state, &config, &job).await;
+    let (status, output, error) = outcome(result);
+    post_result(&state, &config, &pending.job_id, status, output.clone(), error.clone()).await;
+    record_and_emit(app, &state, &pending.job_id, &pending.job_kind, status, error.as_deref(), Some(input_val), output);
+    Ok(())
 }
 
 pub async fn dispatch_tool(

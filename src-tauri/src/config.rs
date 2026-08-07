@@ -2,6 +2,8 @@ use chrono::Utc;
 use reqwest::Client;
 use sha2::{Digest, Sha256};
 use std::{collections::HashMap, fs, path::PathBuf, sync::Mutex};
+use tokio::sync::mpsc::UnboundedSender;
+use tokio_tungstenite::tungstenite::Message;
 
 use serde_json::Value;
 
@@ -21,6 +23,10 @@ pub struct AppState {
     pub pending: Mutex<Vec<PendingApproval>>,
     pub terminals: Mutex<HashMap<String, TerminalSession>>,
     pub client: Client,
+    /// Set while the socket is connected; lets code outside socket.rs (e.g.
+    /// queue_for_approval) push a message onto the live connection. Best-effort: a
+    /// message sent while this is `None` (or the send fails) is simply not synced yet.
+    pub outbound: Mutex<Option<UnboundedSender<Message>>>,
 }
 
 pub fn normalize_api_url(raw: &str) -> String {

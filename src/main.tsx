@@ -17,6 +17,7 @@ import Providers from "@/app/providers";
 import AppLayout from "@/app/(app)/layout";
 import ChatPage from "@/app/(app)/app/chat/page";
 import ConversationsPage from "@/app/(app)/app/conversations/page";
+import HomePage from "@/app/(app)/app/home/page";
 import IntegrationsPage from "@/app/(app)/app/integrations/page";
 import MobileLoginPage from "@/app/(app)/app/mobile-login/page";
 import PlansPage from "@/app/(app)/app/plans/page";
@@ -44,6 +45,7 @@ const preferenceShape = (config: AgentConfig): DesktopPreferences => ({ runOnSta
 function DesktopRouter({ desktopPage }: { desktopPage: React.ReactNode }) {
   const pathname = usePathname();
   const pages: Record<string, React.ReactNode> = {
+    "/app/home": <HomePage />,
     "/app/chat": <ChatPage />,
     "/app/conversations": <ConversationsPage />,
     "/app/integrations": <IntegrationsPage />,
@@ -172,16 +174,6 @@ function App() {
     }
   };
 
-  const approve = async (jobId: string, approved: boolean) => {
-    try {
-      await invoke("approve_command", { jobId, approved });
-      await refresh();
-      toast(approved ? "Command approved and running." : "Command denied.", approved ? "success" : "info");
-    } catch (err) {
-      toast(`Approval failed: ${err instanceof Error ? err.message : String(err)}`, "error");
-    }
-  };
-
   const setCommandTrustMode = async (mode: CommandTrustMode) => {
     try {
       const next = await invoke<AgentConfig>("set_command_trust_mode", { mode });
@@ -232,7 +224,7 @@ function App() {
                 <ConnectionPanel config={config} onReset={() => void resetConnection()} />
                 <FoldersPanel folders={config.folders} onAdd={() => void addFolder()} onRemove={(path) => void removeFolder(path)} />
               </div>
-              <div className="mt-5 space-y-5"><ApprovalsPanel config={config} pending={pending} onRefresh={() => void refresh()} onApprove={(jobId, approved) => void approve(jobId, approved)} onSetCommandTrustMode={(mode) => void setCommandTrustMode(mode)} /><ActivityList actions={config.recentActions} /></div>
+              <div className="mt-5 space-y-5"><ApprovalsPanel config={config} pending={pending} onRefresh={() => void refresh()} onSetCommandTrustMode={(mode) => void setCommandTrustMode(mode)} /><ActivityList actions={config.recentActions} /></div>
             </div>
             <ToastContainer toasts={toasts} onDismiss={dismiss} />
           </main>
