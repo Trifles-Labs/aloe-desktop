@@ -49,8 +49,6 @@ function DesktopRouter({ desktopPage }: { desktopPage: React.ReactNode }) {
     "/app/home": <ChatSurfaceLayout><HomePage /></ChatSurfaceLayout>,
     "/app/chat": <ChatSurfaceLayout><ChatPage /></ChatSurfaceLayout>,
     "/app/conversations": <ConversationsPage />,
-    "/app/integrations": <IntegrationsPage />,
-    "/app/mobile-login": <MobileLoginPage />,
     "/app/plans": <PlansPage />,
     "/app/settings": <SettingsPage />,
     "/app/tasks": <TasksPage />,
@@ -58,7 +56,6 @@ function DesktopRouter({ desktopPage }: { desktopPage: React.ReactNode }) {
     "/app/board": <BoardPage />,
     "/app/approvals": <ApprovalsPage />,
     "/app/memory": <MemoryPage />,
-    "/app/mcp": <McpPage />,
     "/app/desktop": desktopPage,
   };
 
