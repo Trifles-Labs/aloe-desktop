@@ -22,6 +22,7 @@ export default defineConfig(({ command, mode }) => {
         "react-dom": path.resolve(here, "node_modules/react-dom"),
         "next/link": path.resolve(here, "src/shims/next-link.tsx"),
         "next/navigation": path.resolve(here, "src/shims/next-navigation.ts"),
+        "next/image": path.resolve(here, "src/shims/next-image.tsx"),
       },
     },
     optimizeDeps: {
@@ -35,6 +36,9 @@ export default defineConfig(({ command, mode }) => {
       strictPort: true,
       port: 1420,
       fs: { allow: [here, webRoot] },
+      watch: {
+        ignored: [path.resolve(here, "src-tauri/**")],
+      },
     },
     build: {
       rollupOptions: {

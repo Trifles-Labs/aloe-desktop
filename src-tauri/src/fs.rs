@@ -157,6 +157,32 @@ pub fn create_file(config: &AgentConfig, input: &Value) -> Result<Value, String>
     Ok(json!({ "path": path.to_string_lossy(), "created": true }))
 }
 
+// Generated binaries (.docx/.xlsx/.pptx/.pdf, screenshots) arrive base64-encoded because the job
+// envelope is JSON. Unlike create_file this overwrites, since "save the report to my Documents
+// folder" run twice should update the report rather than fail — the caller names the exact path,
+// so an overwrite is never a surprise.
+//
+// The target folder must already exist: assert_granted canonicalises the parent to prove the path
+// is inside a granted root, which cannot be done for a directory that isn't there yet. Callers
+// name an existing folder, so this is a clearer failure than silently creating a tree.
+pub fn write_binary_file(config: &AgentConfig, input: &Value) -> Result<Value, String> {
+    let path = assert_granted(config, &input_string(input, "path")?)?;
+    assert_safe_write(&path)?;
+
+    let bytes = BASE64
+        .decode(input_string(input, "base64")?)
+        .map_err(|e| format!("base64 payload could not be decoded: {e}"))?;
+
+    let existed = path.exists();
+    fs::write(&path, &bytes).map_err(|e| e.to_string())?;
+
+    Ok(json!({
+        "path": path.to_string_lossy(),
+        "sizeBytes": bytes.len(),
+        "overwrote": existed,
+    }))
+}
+
 // Exact-match find/replace, the same contract as an editor's find/replace: oldString must match
 // the file's current text byte-for-byte and be unique unless replaceAll is set. This intentionally
 // does not fall back to a full-content overwrite — a missing/ambiguous oldString is a real error

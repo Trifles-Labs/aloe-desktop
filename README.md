@@ -11,6 +11,7 @@ The app is built with Tauri 2, Rust, React 19, Vite, and Bun.
 - Grant and revoke local folder access.
 - Search, read, create, update, delete, and patch files inside granted folders.
 - Run commands and terminal sessions with approval controls.
+- Drive a real local Chrome over the DevTools Protocol so Aloe can use sites behind the user's own logins.
 - Choose command trust mode: ask every time, trusted coding commands, or allow all.
 - Show pending approvals and recent agent activity in the desktop UI.
 - Support tray behavior, startup preferences, notifications, and silent auto-updates.
@@ -93,6 +94,19 @@ Use **Log out** in the app to reset the agent connection and remove stored crede
 - `all`: command approvals are disabled.
 
 File operations are still limited to folders the user has explicitly granted.
+
+## Browser Automation
+
+Aloe drives Chrome (or Chromium/Edge) through the DevTools Protocol on `127.0.0.1:9333`. If something is already listening there, Aloe attaches to it; otherwise it launches the browser itself.
+
+Two profiles are available:
+
+- `default` — the user's everyday Chrome profile, with their existing logins. Chrome must not already be running with that profile, because a second instance cannot open a debugging port on a locked profile. Aloe reports this explicitly if the port never comes up.
+- `aloe` — a separate profile under `Aloe Desktop/browser-profile`, which can run alongside a normal Chrome window but starts signed out. Logins persist there between sessions.
+
+Browser actions are **not** gated by the command-approval modes above: navigation, clicks, and typing run as soon as they are requested. Page content is untrusted input — a page that instructs the assistant to do something is data about that page, not a request from the user.
+
+Aloe never launches the browser headless. The window is visible so the user can watch and take over.
 
 ## Releases and Updates
 

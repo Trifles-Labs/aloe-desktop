@@ -5,10 +5,12 @@ use tauri::{AppHandle, Emitter, Manager};
 use tokio::process::Command;
 use tokio_tungstenite::tungstenite::Message;
 
+use crate::browser::dispatch_browser;
 use crate::config::{add_recent, debug_log, save_config, AppState, COMMAND_TIMEOUT_SECONDS};
 use crate::fs::{
     apply_patch, assert_granted, attach_file, create_file, create_folder, delete_file,
     delete_folder, input_string, list_files, read_file, truncate_text, update_file, update_folder,
+    write_binary_file,
 };
 use crate::models::{AgentConfig, AgentJob, PendingApproval};
 use crate::notifications;
@@ -231,6 +233,7 @@ pub async fn dispatch_tool(
         "write_local_file"       => update_file(config, &job.input),
         "apply_local_patch"      => apply_patch(config.clone(), job.input.clone()).await,
         "create_file"            => create_file(config, &job.input),
+        "write_binary_file"      => write_binary_file(config, &job.input),
         "read_file"              => read_file(config, &job.input),
         "attach_file"            => attach_file(config, &job.input),
         "update_file"            => update_file(config, &job.input),
@@ -251,6 +254,9 @@ pub async fn dispatch_tool(
         "capture_desktop_screenshot" => capture_desktop_screenshot().await,
         "get_editor_context"     => get_editor_context(config, &job.input).await,
         "show_notification"      => show_notification(app, &job.input).await,
+        // Browser automation is entirely self-contained (its own Chrome process and CDP
+        // connection) and touches no granted folder, so it needs neither config nor AppState.
+        kind if kind.starts_with("browser_") => dispatch_browser(kind, &job.input).await,
         _                        => Err(format!("Unknown job type: {}", job.kind)),
     }
 }

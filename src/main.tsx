@@ -15,9 +15,10 @@ import { DesktopTitleBar } from "./components/DesktopTitleBar";
 import { ThemeProvider } from "next-themes";
 import Providers from "@/app/providers";
 import AppLayout from "@/app/(app)/layout";
-import ChatPage from "@/app/(app)/app/chat/page";
+import ChatSurfaceLayout from "@/app/(app)/app/(surface)/layout";
+import ChatPage from "@/app/(app)/app/(surface)/chat/page";
 import ConversationsPage from "@/app/(app)/app/conversations/page";
-import HomePage from "@/app/(app)/app/home/page";
+import HomePage from "@/app/(app)/app/(surface)/home/page";
 import IntegrationsPage from "@/app/(app)/app/integrations/page";
 import MobileLoginPage from "@/app/(app)/app/mobile-login/page";
 import PlansPage from "@/app/(app)/app/plans/page";
@@ -45,8 +46,8 @@ const preferenceShape = (config: AgentConfig): DesktopPreferences => ({ runOnSta
 function DesktopRouter({ desktopPage }: { desktopPage: React.ReactNode }) {
   const pathname = usePathname();
   const pages: Record<string, React.ReactNode> = {
-    "/app/home": <HomePage />,
-    "/app/chat": <ChatPage />,
+    "/app/home": <ChatSurfaceLayout><HomePage /></ChatSurfaceLayout>,
+    "/app/chat": <ChatSurfaceLayout><ChatPage /></ChatSurfaceLayout>,
     "/app/conversations": <ConversationsPage />,
     "/app/integrations": <IntegrationsPage />,
     "/app/mobile-login": <MobileLoginPage />,
