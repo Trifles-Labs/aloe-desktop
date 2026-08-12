@@ -121,7 +121,7 @@ fn mime_type_from_path(path: &Path) -> &'static str {
     }
 }
 
-const MAX_ATTACH_BYTES: u64 = 15_000_000; // ~15 MB raw
+use crate::config::MAX_ATTACH_BYTES;
 
 pub fn attach_file(config: &AgentConfig, input: &Value) -> Result<Value, String> {
     let path = assert_granted(config, &input_string(input, "path")?)?;

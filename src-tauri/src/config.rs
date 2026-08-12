@@ -10,13 +10,44 @@ use serde_json::Value;
 use crate::models::{AgentConfig, GrantedFolder, PendingApproval, RecentAction};
 use crate::terminal::TerminalSession;
 
+// ── Tunable constants ────────────────────────────────────────────────────────
+// Every limit and timeout the agent enforces lives here, including the ones that used to sit in
+// browser.rs, fs.rs and terminal.rs. They are compile-time constants rather than settings: this is
+// a signed desktop binary, so a "configurable" limit that a local file could raise would be a way
+// around the sandbox the granted-folder model depends on.
+
+/// Backend the agent talks to in a release build. `ALOE_BACKEND_URL` overrides it at compile time;
+/// debug builds default to a local backend instead. See `default_api_url`.
 pub const FALLBACK_PROD_API_URL: &str = "https://api.247autoarmy.in/";
-// pub const FALLBACK_PROD_API_URL: &str = "http://localhost:8080/";
+/// Backend used by debug builds.
+pub const FALLBACK_DEBUG_API_URL: &str = "http://127.0.0.1:8080";
+
+// ── Search and file reads ────────────────────────────────────────────────────
 pub const MAX_SEARCH_RESULTS: usize = 80;
 pub const MAX_TEXT_BYTES: usize = 256_000;
+/// Largest file the agent will read into an attachment (~15 MB raw).
+pub const MAX_ATTACH_BYTES: u64 = 15_000_000;
+
+// ── Command execution ────────────────────────────────────────────────────────
 pub const COMMAND_TIMEOUT_SECONDS: u64 = 60;
+/// Scrollback retained per terminal session.
+pub const MAX_TERMINAL_BUFFER_BYTES: usize = 128_000;
+
+// ── Backend socket ───────────────────────────────────────────────────────────
 pub const SOCKET_HEARTBEAT_MS: u64 = 5_000;
 pub const SOCKET_RECONNECT_MAX_MS: u64 = 15_000;
+
+// ── Browser automation ───────────────────────────────────────────────────────
+/// Port the agent starts Chrome's remote-debugging listener on.
+pub const BROWSER_DEBUG_PORT: u16 = 9333;
+pub const BROWSER_LAUNCH_TIMEOUT_SECONDS: u64 = 20;
+pub const BROWSER_CDP_TIMEOUT_SECONDS: u64 = 30;
+pub const BROWSER_NAVIGATION_TIMEOUT_SECONDS: u64 = 30;
+pub const MAX_PAGE_TEXT_CHARS: usize = 12_000;
+
+// ── Persisted history ────────────────────────────────────────────────────────
+/// Recent actions and terminal sessions retained in config.json.
+pub const MAX_PERSISTED_HISTORY: usize = 50;
 
 pub struct AppState {
     pub config: Mutex<AgentConfig>,
@@ -39,7 +70,7 @@ pub fn normalize_api_url(raw: &str) -> String {
 
 pub fn default_api_url() -> String {
     let fallback = if cfg!(debug_assertions) {
-        "http://127.0.0.1:8080"
+        FALLBACK_DEBUG_API_URL
     } else {
         FALLBACK_PROD_API_URL
     };
@@ -106,7 +137,7 @@ pub fn load_config() -> AgentConfig {
             session.status = "interrupted".to_string();
         }
     }
-    config.terminal_sessions.truncate(50);
+    config.terminal_sessions.truncate(MAX_PERSISTED_HISTORY);
     config
 }
 
@@ -161,7 +192,7 @@ pub fn add_recent(
             output: output.map(compact_value),
         },
     );
-    config.recent_actions.truncate(50);
+    config.recent_actions.truncate(MAX_PERSISTED_HISTORY);
 }
 
 pub fn make_granted_folder(canonical: &std::path::Path) -> GrantedFolder {

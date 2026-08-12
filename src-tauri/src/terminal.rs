@@ -12,13 +12,13 @@ use tokio::{
 use uuid::Uuid;
 
 use crate::{
-    config::{save_config, AppState, COMMAND_TIMEOUT_SECONDS},
+    config::{save_config, AppState, COMMAND_TIMEOUT_SECONDS, MAX_TERMINAL_BUFFER_BYTES},
     fs::{assert_granted, input_string, truncate_text},
     models::{AgentConfig, PersistedTerminalSession},
     shell::{build_shell_command, hide_command_window},
 };
 
-const MAX_BUFFER_BYTES: usize = 128_000;
+const MAX_BUFFER_BYTES: usize = MAX_TERMINAL_BUFFER_BYTES;
 
 #[derive(Clone)]
 pub struct TerminalSession {

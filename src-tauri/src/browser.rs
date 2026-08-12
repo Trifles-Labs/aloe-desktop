@@ -38,11 +38,16 @@ use crate::config::debug_log;
 use crate::fs::input_string;
 use crate::shell::hide_command_window;
 
-const DEFAULT_DEBUG_PORT: u16 = 9333;
-const LAUNCH_TIMEOUT: Duration = Duration::from_secs(20);
-const CDP_TIMEOUT: Duration = Duration::from_secs(30);
-const NAVIGATION_TIMEOUT: Duration = Duration::from_secs(30);
-const MAX_PAGE_TEXT_CHARS: usize = 12_000;
+// Limits live in config.rs; these bind the durations that Rust cannot express as consts there.
+use crate::config::{
+    BROWSER_CDP_TIMEOUT_SECONDS, BROWSER_DEBUG_PORT, BROWSER_LAUNCH_TIMEOUT_SECONDS,
+    BROWSER_NAVIGATION_TIMEOUT_SECONDS, MAX_PAGE_TEXT_CHARS,
+};
+
+const DEFAULT_DEBUG_PORT: u16 = BROWSER_DEBUG_PORT;
+const LAUNCH_TIMEOUT: Duration = Duration::from_secs(BROWSER_LAUNCH_TIMEOUT_SECONDS);
+const CDP_TIMEOUT: Duration = Duration::from_secs(BROWSER_CDP_TIMEOUT_SECONDS);
+const NAVIGATION_TIMEOUT: Duration = Duration::from_secs(BROWSER_NAVIGATION_TIMEOUT_SECONDS);
 
 #[derive(Default)]
 pub struct BrowserState {
