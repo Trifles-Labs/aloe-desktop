@@ -13,11 +13,37 @@ const subscribe = (listener: () => void) => {
 
 const currentPath = () => window.location.pathname;
 
-const navigate = (href: string, replace = false) => {
+/* Every entry carries its own depth. A browser hands you back/forward buttons
+   for free; a Tauri window has no chrome at all, so the title bar draws them —
+   and it can only know whether they are live if each entry is stamped on the
+   way in. `furthest` is the far end of the stack: a push from the middle of it
+   truncates whatever was ahead, which is exactly when forward has to go dead. */
+type RouteState = { aloeIndex?: number } | null;
+
+const stateIndex = () => (window.history.state as RouteState)?.aloeIndex ?? 0;
+
+let furthest = 0;
+
+export const navigateTo = (href: string, replace = false) => {
   const url = new URL(href, window.location.origin);
-  window.history[replace ? "replaceState" : "pushState"]({}, "", `${url.pathname}${url.search}${url.hash}`);
+  const index = replace ? stateIndex() : stateIndex() + 1;
+  const target = `${url.pathname}${url.search}${url.hash}`;
+
+  window.history[replace ? "replaceState" : "pushState"]({ aloeIndex: index }, "", target);
+  furthest = replace ? Math.max(furthest, index) : index;
   window.dispatchEvent(new Event(ROUTE_EVENT));
 };
+
+/** Where this entry sits in the session stack, for the title bar's back/forward. */
+export const routePosition = () => {
+  const index = stateIndex();
+  return { index, furthest: Math.max(furthest, index) };
+};
+
+export const goBack = () => window.history.back();
+export const goForward = () => window.history.forward();
+
+export const subscribeToRoute = subscribe;
 
 export const usePathname = () => useSyncExternalStore(subscribe, currentPath, () => "/app/chat");
 
@@ -33,13 +59,14 @@ export const useSearchParams = () => {
 };
 
 export const useRouter = () => ({
-  push: (href: string) => navigate(href),
-  replace: (href: string) => navigate(href, true),
-  back: () => window.history.back(),
+  push: (href: string) => navigateTo(href),
+  replace: (href: string) => navigateTo(href, true),
+  back: goBack,
+  forward: goForward,
   refresh: () => window.dispatchEvent(new Event(ROUTE_EVENT)),
 });
 
 export const redirect = (href: string): never => {
-  navigate(href, true);
+  navigateTo(href, true);
   throw new Error(`Redirected to ${href}`);
 };
