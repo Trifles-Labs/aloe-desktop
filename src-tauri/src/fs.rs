@@ -204,6 +204,22 @@ pub fn update_file(config: &AgentConfig, input: &Value) -> Result<Value, String>
     }
 
     let content = fs::read_to_string(&path).map_err(|e| e.to_string())?;
+
+    // read_file hands the model LF-only text (it rebuilds each file with `.lines().join("\n")`), so
+    // on a CRLF file every multi-line oldString taken from a read is guaranteed to miss — the exact
+    // failure that reads as "oldString was not found" on content the model just looked at. Retry
+    // with CRLF line endings so the comparison happens in the file's own encoding, which also keeps
+    // newString's endings consistent with the rest of the file instead of splicing LF into it.
+    let (old_string, new_string) = if content.matches(old_string.as_str()).count() == 0
+        && content.contains("\r\n")
+        && old_string.contains('\n')
+        && !old_string.contains('\r')
+    {
+        (old_string.replace('\n', "\r\n"), new_string.replace('\n', "\r\n"))
+    } else {
+        (old_string, new_string)
+    };
+
     let occurrences = content.matches(old_string.as_str()).count();
 
     if occurrences == 0 {
@@ -280,33 +296,64 @@ pub fn delete_folder(config: &AgentConfig, input: &Value) -> Result<Value, Strin
 
 // ── Patch ─────────────────────────────────────────────────────────────────────
 
+// `git apply` matches context lines byte-for-byte, so a stray CR is a mismatch, not whitespace it
+// will forgive. The model never sees real line endings — read_file rebuilds every file as LF (see
+// `read_file`) — yet it still emits CRLF into the patch payload often enough to matter, usually by
+// mirroring Windows content it saw somewhere else, and a patch with mixed endings fails outright.
+// Normalising to LF is safe in both directions: git happily applies an LF patch to a CRLF working
+// file and preserves that file's endings, which is verified in `apply_patch_handles_crlf_payload`.
+//
+// The trailing newline matters just as much. A patch whose last line has no "\n" is rejected as
+// "corrupt patch at line N", and a model emitting JSON strings drops it constantly.
+fn normalize_patch(patch: &str) -> String {
+    let mut normalized = String::with_capacity(patch.len() + 1);
+    for line in patch.split_inclusive('\n') {
+        let body = line.strip_suffix('\n').unwrap_or(line);
+        normalized.push_str(body.strip_suffix('\r').unwrap_or(body));
+        normalized.push('\n');
+    }
+    normalized
+}
+
+// Header paths are validated on BOTH sides. Checking only "+++" left deletions unguarded: a hunk
+// reading "--- a/.env" / "+++ /dev/null" has no target line to check, so it skipped
+// assert_safe_write entirely and could delete the very files every other operation blocks.
+fn patch_header_path(raw: &str, strip: &str) -> Result<Option<PathBuf>, String> {
+    // git may append a tab and a timestamp to a header path.
+    let raw = raw.split('\t').next().unwrap_or(raw).trim();
+    if raw == "/dev/null" {
+        return Ok(None);
+    }
+    let path = PathBuf::from(raw.strip_prefix(strip).unwrap_or(raw));
+    if path.is_absolute() || path.components().any(|p| matches!(p, Component::ParentDir)) {
+        return Err("Patch contains an unsafe target path.".to_string());
+    }
+    Ok(Some(path))
+}
+
 fn patch_target_paths(patch: &str) -> Result<Vec<PathBuf>, String> {
     let mut paths = Vec::new();
     for line in patch.lines() {
-        if let Some(raw) = line.strip_prefix("+++ ") {
-            if raw == "/dev/null" {
-                continue;
-            }
-            let clean = raw.trim().strip_prefix("b/").unwrap_or(raw.trim());
-            let path = PathBuf::from(clean);
-            if path.is_absolute() || path.components().any(|p| matches!(p, Component::ParentDir)) {
-                return Err("Patch contains an unsafe target path.".to_string());
-            }
+        let parsed = if let Some(raw) = line.strip_prefix("+++ ") {
+            patch_header_path(raw, "b/")?
+        } else if let Some(raw) = line.strip_prefix("--- ") {
+            patch_header_path(raw, "a/")?
+        } else {
+            None
+        };
+        if let Some(path) = parsed {
             paths.push(path);
         }
     }
     Ok(paths)
 }
 
-pub async fn apply_patch(config: AgentConfig, input: Value) -> Result<Value, String> {
-    let root = assert_granted(&config, &input_string(&input, "path")?)?;
-    let patch = input_string(&input, "patch")?;
-    for relative in patch_target_paths(&patch)? {
-        assert_safe_write(&root.join(relative))?;
-    }
+async fn run_git_apply(root: &Path, patch: &str, extra: &[&str]) -> Result<(bool, String), String> {
+    let mut args = vec!["apply", "--whitespace=nowarn", "--recount"];
+    args.extend_from_slice(extra);
     let mut child = Command::new("git")
-        .args(["apply", "--whitespace=nowarn"])
-        .current_dir(&root)
+        .args(&args)
+        .current_dir(root)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -317,14 +364,40 @@ pub async fn apply_patch(config: AgentConfig, input: Value) -> Result<Value, Str
         stdin.write_all(patch.as_bytes()).await.map_err(|e| e.to_string())?;
     }
     let output = child.wait_with_output().await.map_err(|e| e.to_string())?;
-    if !output.status.success() {
-        return Err(String::from_utf8_lossy(&output.stderr).to_string());
+    Ok((output.status.success(), String::from_utf8_lossy(&output.stderr).trim().to_string()))
+}
+
+pub async fn apply_patch(config: AgentConfig, input: Value) -> Result<Value, String> {
+    let root = assert_granted(&config, &input_string(&input, "path")?)?;
+    let patch = normalize_patch(&input_string(&input, "patch")?);
+    for relative in patch_target_paths(&patch)? {
+        assert_safe_write(&root.join(relative))?;
     }
-    Ok(json!({
-        "path": root.to_string_lossy(),
-        "applied": true,
-        "stdout": String::from_utf8_lossy(&output.stdout),
-    }))
+
+    // `--recount` makes the hunk header's line counts advisory, which removes the other routine
+    // "corrupt patch" cause: a model that miscounts "@@ -1,9 +1,9 @@" for a hunk it wrote correctly.
+    let (applied, strict_error) = run_git_apply(&root, &patch, &[]).await?;
+    if applied {
+        return Ok(json!({ "path": root.to_string_lossy(), "applied": true, "fuzzy": false }));
+    }
+
+    // Last resort. --ignore-whitespace can match a hunk whose indentation drifted, so it is never
+    // the first attempt and the result says it was used — in an indentation-sensitive file the
+    // caller needs to read the result back rather than trust a bare "applied".
+    let (applied, loose_error) = run_git_apply(&root, &patch, &["--ignore-whitespace"]).await?;
+    if applied {
+        return Ok(json!({
+            "path": root.to_string_lossy(),
+            "applied": true,
+            "fuzzy": true,
+            "note": "Applied with --ignore-whitespace after an exact match failed; read the changed files back to confirm indentation is correct.",
+        }));
+    }
+
+    let detail = if loose_error.is_empty() { strict_error.clone() } else { loose_error };
+    Err(format!(
+        "{detail}\n\nThe patch did not apply. Context lines must reproduce the file's current text exactly, including indentation. Re-read the affected file and rebuild the patch from what it actually contains; use update_file instead if the change is a single scoped replacement."
+    ))
 }
 
 // kept in config.rs but re-exported here for use in read_file / update_file
@@ -460,5 +533,108 @@ mod tests {
 
         assert!(err.contains("outside"), "unexpected error: {err}");
         assert_eq!(fs::read_to_string(&file).unwrap(), "hello world");
+    }
+
+    // read_file shows the model LF, so this is the oldString it can actually produce for a CRLF file.
+    #[test]
+    fn update_file_matches_an_lf_snippet_against_a_crlf_file() {
+        let dir = temp_project("crlf_update");
+        let file = dir.join("a.txt");
+        fs::write(&file, "one\r\ntwo\r\nthree\r\n").unwrap();
+        let config = config_granting(&dir);
+
+        update_file(&config, &json!({
+            "path": file.to_string_lossy(),
+            "oldString": "one\ntwo",
+            "newString": "one\nTWO",
+        })).expect("an LF snippet should match a CRLF file");
+
+        // The file keeps its CRLF endings — the edit must not splice LF into a CRLF file.
+        assert_eq!(fs::read_to_string(&file).unwrap(), "one\r\nTWO\r\nthree\r\n");
+    }
+
+    #[test]
+    fn normalize_patch_strips_cr_and_adds_a_trailing_newline() {
+        assert_eq!(normalize_patch("--- a/f\r\n+++ b/f\r\n"), "--- a/f\n+++ b/f\n");
+        assert_eq!(normalize_patch(" context\n-old\n+new"), " context\n-old\n+new\n");
+        // A mixed-ending payload is the worst case: git rejects it outright.
+        assert_eq!(normalize_patch("a\r\nb\nc"), "a\nb\nc\n");
+    }
+
+    #[test]
+    fn patch_target_paths_reads_both_header_sides() {
+        let paths = patch_target_paths("--- a/src/x.ts\n+++ b/src/y.ts\n").unwrap();
+        assert_eq!(paths, vec![PathBuf::from("src/x.ts"), PathBuf::from("src/y.ts")]);
+    }
+
+    // A deletion has no "+++" target, which previously meant no safe-write check ran at all.
+    #[test]
+    fn patch_target_paths_reports_the_source_of_a_deletion() {
+        let paths = patch_target_paths("--- a/.env\n+++ /dev/null\n").unwrap();
+        assert_eq!(paths, vec![PathBuf::from(".env")]);
+    }
+
+    #[test]
+    fn patch_target_paths_rejects_an_escaping_source_path() {
+        let err = patch_target_paths("--- a/../../secrets.txt\n+++ /dev/null\n").unwrap_err();
+        assert!(err.contains("unsafe"), "unexpected error: {err}");
+    }
+
+    fn git_repo(name: &str) -> PathBuf {
+        let dir = temp_project(name);
+        for args in [vec!["init", "-q", "."], vec!["config", "user.email", "t@t"], vec!["config", "user.name", "t"]] {
+            std::process::Command::new("git").args(&args).current_dir(&dir).output().expect("git");
+        }
+        dir
+    }
+
+    // Each of these payloads fails against the pre-fix implementation.
+    #[tokio::test]
+    async fn apply_patch_handles_crlf_payload_and_miscounted_hunks() {
+        let dir = git_repo("apply_crlf");
+        let file = dir.join("f.txt");
+        fs::write(&file, "a\r\nb\r\nc\r\n").unwrap();
+        let config = config_granting(&dir);
+
+        // CRLF headers/context, deliberately wrong hunk counts, and no trailing newline.
+        let patch = "--- a/f.txt\r\n+++ b/f.txt\r\n@@ -1,9 +1,9 @@\r\n a\r\n-b\r\n+B\r\n c";
+
+        let result = apply_patch(config, json!({ "path": dir.to_string_lossy(), "patch": patch }))
+            .await
+            .expect("apply_patch should succeed");
+
+        assert_eq!(result["applied"], true);
+        assert_eq!(result["fuzzy"], false, "this should apply exactly, not via --ignore-whitespace");
+        assert_eq!(fs::read_to_string(&file).unwrap(), "a\r\nB\r\nc\r\n");
+    }
+
+    #[tokio::test]
+    async fn apply_patch_blocks_a_patch_that_deletes_a_sensitive_file() {
+        let dir = git_repo("apply_delete_env");
+        let file = dir.join(".env");
+        fs::write(&file, "SECRET=1\n").unwrap();
+        let config = config_granting(&dir);
+
+        let err = apply_patch(config, json!({
+            "path": dir.to_string_lossy(),
+            "patch": "--- a/.env\n+++ /dev/null\n@@ -1 +0,0 @@\n-SECRET=1\n",
+        })).await.unwrap_err();
+
+        assert!(err.contains("sensitive"), "unexpected error: {err}");
+        assert!(file.exists(), ".env must survive a deletion patch");
+    }
+
+    #[tokio::test]
+    async fn apply_patch_explains_a_genuine_context_mismatch() {
+        let dir = git_repo("apply_mismatch");
+        fs::write(dir.join("f.txt"), "a\nb\nc\n").unwrap();
+        let config = config_granting(&dir);
+
+        let err = apply_patch(config, json!({
+            "path": dir.to_string_lossy(),
+            "patch": "--- a/f.txt\n+++ b/f.txt\n@@ -1,3 +1,3 @@\n a\n-nothing like this\n+z\n c\n",
+        })).await.unwrap_err();
+
+        assert!(err.contains("Re-read the affected file"), "unexpected error: {err}");
     }
 }
