@@ -3,7 +3,29 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="light dark" />
     <title>Aloe Desktop</title>
+    <style>
+      /* The window is painted before any CSS module loads, so the page wash is
+         declared here too — otherwise every launch starts on a white rectangle. */
+      :root { background: #eef1ea; color-scheme: light; }
+      html.dark { background: #0f1512; color-scheme: dark; }
+      body { margin: 0; }
+    </style>
+    <script>
+      /* next-themes only writes the class once React has mounted, which on a
+         desktop launch is late enough to see. Same key, same rules, run before
+         the first frame — the provider then agrees with what is already there. */
+      (function () {
+        try {
+          var stored = localStorage.getItem("theme");
+          var dark = stored === "dark" || ((!stored || stored === "system") && window.matchMedia("(prefers-color-scheme: dark)").matches);
+          if (dark) document.documentElement.classList.add("dark");
+        } catch (error) {
+          /* Private mode or a locked-down storage policy — light is the default. */
+        }
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>

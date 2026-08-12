@@ -1,28 +1,61 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { CheckCircle2, Info, X, XCircle } from "lucide-react";
+
+import { EASE_OUT } from "@/lib/motion";
 import type { Toast, ToastVariant } from "./types";
+
+const LIFETIME = 4200;
 
 // ── Hook ──────────────────────────────────────────────────────────────────────
 
 export function useToasts() {
   const [toasts, setToasts] = useState<Toast[]>([]);
   const timers = useRef<Map<string, number>>(new Map());
+  /* Remaining lifetime per toast, so hovering can hold one open and let go
+     where it left off — a message that expires while you are reading it is the
+     one failure mode of a timed toast. */
+  const remaining = useRef<Map<string, { left: number; startedAt: number }>>(new Map());
 
   const dismiss = useCallback((id: string) => {
     window.clearTimeout(timers.current.get(id));
     timers.current.delete(id);
+    remaining.current.delete(id);
     setToasts((prev) => prev.filter((t) => t.id !== id));
   }, []);
+
+  const schedule = useCallback(
+    (id: string, left: number) => {
+      window.clearTimeout(timers.current.get(id));
+      remaining.current.set(id, { left, startedAt: Date.now() });
+      timers.current.set(id, window.setTimeout(() => dismiss(id), left));
+    },
+    [dismiss],
+  );
 
   const toast = useCallback(
     (message: string, variant: ToastVariant = "info") => {
       const id = Math.random().toString(36).slice(2, 10);
-      setToasts((prev) => [...prev, { id, message, variant }]);
-      const timer = window.setTimeout(() => dismiss(id), 4200);
-      timers.current.set(id, timer);
+      // Three at a time is already more than anyone reads; the oldest goes.
+      setToasts((prev) => [...prev, { id, message, variant }].slice(-3));
+      schedule(id, LIFETIME);
     },
-    [dismiss],
+    [schedule],
+  );
+
+  const pause = useCallback((id: string) => {
+    const entry = remaining.current.get(id);
+    if (!entry) return;
+    window.clearTimeout(timers.current.get(id));
+    remaining.current.set(id, { left: Math.max(600, entry.left - (Date.now() - entry.startedAt)), startedAt: Date.now() });
+  }, []);
+
+  const resume = useCallback(
+    (id: string) => {
+      const entry = remaining.current.get(id);
+      if (entry) schedule(id, entry.left);
+    },
+    [schedule],
   );
 
   useEffect(() => {
@@ -30,7 +63,7 @@ export function useToasts() {
     return () => ref.forEach((t) => window.clearTimeout(t));
   }, []);
 
-  return { toasts, toast, dismiss };
+  return { toasts, toast, dismiss, pause, resume };
 }
 
 // ── Container ─────────────────────────────────────────────────────────────────
@@ -54,29 +87,38 @@ function ToastIcon({ variant }: { variant: ToastVariant }) {
 type ToastContainerProps = {
   toasts: Toast[];
   onDismiss: (id: string) => void;
+  onPause?: (id: string) => void;
+  onResume?: (id: string) => void;
 };
 
-export function ToastContainer({ toasts, onDismiss }: ToastContainerProps) {
-  if (toasts.length === 0) return null;
+export function ToastContainer({ toasts, onDismiss, onPause, onResume }: ToastContainerProps) {
   return (
-    <div className="pointer-events-none fixed right-6 top-6 z-50 flex w-full max-w-sm flex-col items-end gap-2" aria-live="polite">
-      <AnimatePresence>
+    /* Below the title bar rather than under it — the bar is z-100 chrome, and a
+       toast that slides beneath the window controls looks like a bug. */
+    <div className="pointer-events-none fixed right-5 top-[3.25rem] z-50 flex w-full max-w-sm flex-col items-end gap-2" aria-live="polite">
+      <AnimatePresence initial={false}>
         {toasts.map((t) => (
           <motion.div
             key={t.id}
-            initial={{ opacity: 0, x: 32, scale: 0.96 }}
-            animate={{ opacity: 1, x: 0, scale: 1 }}
-            exit={{ opacity: 0, x: 32, scale: 0.96 }}
-            transition={{ duration: 0.25, ease: "easeOut" }}
+            layout
+            initial={{ opacity: 0, transform: "translateX(28px) scale(0.96)" }}
+            animate={{ opacity: 1, transform: "translateX(0px) scale(1)" }}
+            /* Leaves the way it came in — the same edge, the same path. */
+            exit={{ opacity: 0, transform: "translateX(28px) scale(0.96)" }}
+            transition={{ duration: 0.24, ease: EASE_OUT }}
             className={`pointer-events-auto flex w-full cursor-pointer items-start gap-2.5 rounded-2xl px-4 py-3 text-sm ${variantClass[t.variant]}`}
             onClick={() => onDismiss(t.id)}
+            onMouseEnter={() => onPause?.(t.id)}
+            onMouseLeave={() => onResume?.(t.id)}
+            onFocus={() => onPause?.(t.id)}
+            onBlur={() => onResume?.(t.id)}
             role="alert"
           >
             <ToastIcon variant={t.variant} />
             <span className="min-w-0 flex-1 leading-5">{t.message}</span>
             <button
               type="button"
-              className="rounded-full p-1 transition-colors hover:bg-white/15"
+              className="rounded-full p-1 transition-colors duration-100 hover:bg-white/15"
               onClick={(e) => { e.stopPropagation(); onDismiss(t.id); }}
               aria-label="Dismiss"
             >

@@ -1,3 +1,13 @@
+/* The web app loads its three faces through next/font, which does not exist
+   here — so the desktop window was rendering the whole design system in Arial
+   with a fallback monospace for every specimen label. The same faces are
+   bundled locally instead: a desktop app should not need the network to have
+   its own typography, and font-display:swap on a cold launch is a visible
+   reflow. Same variable names, so every rule in globals.css picks them up. */
+@import "@fontsource-variable/instrument-sans";
+@import "@fontsource-variable/bricolage-grotesque";
+@import "@fontsource-variable/geist-mono";
+
 @import "../../aloe-frontend/app/globals.css";
 
 @source "../../aloe-frontend/app";
@@ -5,3 +15,15 @@
 @source "../../aloe-frontend/contexts";
 @source "../../aloe-frontend/lib";
 @source "./";
+
+:root {
+  --font-geist-sans: "Instrument Sans Variable";
+  --font-geist-mono: "Geist Mono Variable";
+  --font-display: "Bricolage Grotesque Variable";
+}
+
+/* Bricolage carries an optical-size axis; let it shape itself to the size it is
+   set at rather than scaling one master outline for headings and labels alike. */
+h1, h2, h3, h4, .font-display {
+  font-optical-sizing: auto;
+}

@@ -34,7 +34,10 @@ export function FoldersPanel({ folders, onAdd, onRemove }: Props) {
               layout={!reduceMotion}
               initial={reduceMotion ? { opacity: 0 } : { opacity: 0, transform: "translateY(-6px)" }}
               animate={{ opacity: 1, transform: "translateY(0px)" }}
-              exit={{ opacity: 0, height: 0 }}
+              /* Fades rather than collapsing: `.settings-row` carries a
+                 min-height, so animating height to 0 stops half way and jumps.
+                 The rows below close the gap with their layout animation. */
+              exit={{ opacity: 0 }}
               transition={{ duration: 0.22, ease: EASE_OUT }}
               /* `group` here, not on the row's parent: the remove control belongs
                  to one folder and should surface for that folder only. */

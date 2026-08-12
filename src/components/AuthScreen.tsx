@@ -58,7 +58,7 @@ export function AuthScreen({ setupToken, onTokenChange, onConnect, connecting, e
       >
         <div className="flex items-center gap-3">
           <div className="brand-mark h-10 w-10">
-            <Leaf className="h-4.5 w-4.5" />
+            <Leaf className="h-5 w-5" />
           </div>
           <div className="min-w-0">
             <p className="eyebrow">Get started</p>

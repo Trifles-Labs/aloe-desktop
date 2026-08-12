@@ -123,11 +123,9 @@ export function DesktopTitleBar() {
     setMaximized(await appWindow.isMaximized());
   }, []);
 
-  const closeToTray = () => {
-    // The window hides rather than quitting, which is worth saying once.
-    window.dispatchEvent(new Event("aloe:desktop-tray-hint"));
-    void invoke("hide_main_window");
-  };
+  // Hides to the tray rather than quitting — the label on the button is what
+  // says so, since the window is gone before any in-app notice could be read.
+  const closeToTray = () => void invoke("hide_main_window");
 
   return (
     <header

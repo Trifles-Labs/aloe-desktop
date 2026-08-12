@@ -15,7 +15,11 @@ export default defineConfig(({ command, mode }) => {
   return {
     plugins: [react(), tailwindcss()],
     resolve: {
-      dedupe: ["react", "react-dom"],
+      /* One motion runtime for the whole window. The web app's components
+         resolve framer-motion from their own node_modules, so without this the
+         bundle carries two copies — two MotionConfig contexts, and layout
+         animations that can't see each other across the seam. */
+      dedupe: ["react", "react-dom", "framer-motion", "motion-dom", "motion-utils"],
       alias: {
         "@": webRoot,
         "react": path.resolve(here, "node_modules/react"),
