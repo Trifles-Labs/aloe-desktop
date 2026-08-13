@@ -6,7 +6,7 @@ use tokio::process::Command;
 use tokio_tungstenite::tungstenite::Message;
 
 use crate::browser::dispatch_browser;
-use crate::config::{add_recent, debug_log, save_config, AppState, COMMAND_TIMEOUT_SECONDS};
+use crate::config::{add_recent, debug_log, rescan_folder_contexts, save_config, AppState, COMMAND_TIMEOUT_SECONDS};
 use crate::fs::{
     apply_patch, assert_granted, attach_file, create_file, create_folder, delete_file,
     delete_folder, input_string, list_files, read_file, truncate_text, update_file, update_folder,
@@ -16,10 +16,39 @@ use crate::models::{AgentConfig, AgentJob, PendingApproval};
 use crate::notifications;
 use crate::search::search_codebase;
 use crate::shell::{build_shell_command, hide_command_window};
+use crate::socket::sync_folders_with_config;
 use crate::terminal::{
     list_terminal_sessions, read_terminal_session, start_terminal_session, stop_terminal_session, wait_terminal_session,
     write_terminal_session,
 };
+
+/// Job kinds that can change a granted folder's MEMORY.md/AGENTS.md. A completed job of one of
+/// these kinds triggers a background re-scan + re-sync so "remember X for this project" is
+/// reflected on the very next turn instead of waiting for the app to restart.
+const FOLDER_CONTEXT_TRIGGER_KINDS: [&str; 5] =
+    ["create_file", "update_file", "write_local_file", "apply_local_patch", "delete_file"];
+
+/// Fire-and-forget: re-scans every granted folder's context and pushes the refresh to the
+/// backend. Best-effort, same as the other outbound syncs in this file — a failure here just
+/// means the next natural sync (folder add, app restart) picks up the change instead.
+fn maybe_resync_folder_context(app: &AppHandle, job_kind: &str, status: &str) {
+    if status != "completed" || !FOLDER_CONTEXT_TRIGGER_KINDS.contains(&job_kind) {
+        return;
+    }
+    let app = app.clone();
+    tauri::async_runtime::spawn(async move {
+        let state = app.state::<AppState>();
+        let config_snapshot = {
+            let mut config = state.config.lock().expect("config mutex");
+            rescan_folder_contexts(&mut config);
+            let _ = save_config(&config);
+            config.clone()
+        };
+        if let Err(e) = sync_folders_with_config(&state.client, &config_snapshot).await {
+            debug_log("folders", "context_resync_error", e);
+        }
+    });
+}
 
 fn trusted_coding_command(command: &str) -> bool {
     let normalized = command.trim().to_lowercase();
@@ -129,6 +158,7 @@ pub async fn execute_job(app: AppHandle, job: AgentJob) {
     post_result(&state, &config, &job.id, status, output.clone(), error.clone()).await;
     debug_log("job", "completed", format!("job_id={} kind={} status={status}", job.id, job.kind));
     record_and_emit(&app, &state, &job.id, &job.kind, status, error.as_deref(), Some(input_snapshot), output);
+    maybe_resync_folder_context(&app, &job.kind, status);
 }
 
 fn outcome(result: Result<Value, String>) -> (&'static str, Option<Value>, Option<String>) {
@@ -217,6 +247,7 @@ pub async fn resolve_pending_approval(app: &AppHandle, job_id: &str, approved: b
     let (status, output, error) = outcome(result);
     post_result(&state, &config, &pending.job_id, status, output.clone(), error.clone()).await;
     record_and_emit(app, &state, &pending.job_id, &pending.job_kind, status, error.as_deref(), Some(input_val), output);
+    maybe_resync_folder_context(app, &pending.job_kind, status);
     Ok(())
 }
 

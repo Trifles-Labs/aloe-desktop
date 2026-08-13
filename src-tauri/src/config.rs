@@ -196,12 +196,27 @@ pub fn add_recent(
 }
 
 pub fn make_granted_folder(canonical: &std::path::Path) -> GrantedFolder {
+    let context = crate::fs::scan_folder_context(canonical);
+    let context_updated_at = context.as_ref().map(|_| Utc::now().to_rfc3339());
     GrantedFolder {
         label: canonical
             .file_name()
             .map(|n| n.to_string_lossy().to_string()),
         path: canonical.to_string_lossy().to_string(),
         indexed_at: Some(Utc::now().to_rfc3339()),
+        context,
+        context_updated_at,
+    }
+}
+
+/// Re-reads every granted folder's MEMORY.md/AGENTS.md and refreshes `context` in place. Called
+/// at startup (so edits made while the app was closed are picked up) and after Aloe itself writes
+/// to one of those files mid-conversation (see executor.rs's post-write resync).
+pub fn rescan_folder_contexts(config: &mut AgentConfig) {
+    for folder in &mut config.folders {
+        let context = crate::fs::scan_folder_context(std::path::Path::new(&folder.path));
+        folder.context_updated_at = context.as_ref().map(|_| Utc::now().to_rfc3339());
+        folder.context = context;
     }
 }
 

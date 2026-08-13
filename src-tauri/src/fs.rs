@@ -55,6 +55,45 @@ pub fn assert_safe_write(path: &Path) -> Result<(), String> {
     }
 }
 
+// ── Folder context preload ──────────────────────────────────────────────────
+
+/// Cap per file (MEMORY.md, AGENTS.md) and, doubled, for their combined content — keeps a
+/// folder's contribution to the system prompt bounded no matter how large the file on disk is.
+pub const MAX_FOLDER_CONTEXT_BYTES: usize = 4_000;
+
+fn truncate_str(value: &str, max_bytes: usize) -> String {
+    if value.len() <= max_bytes {
+        return value.to_string();
+    }
+    let mut end = max_bytes;
+    while !value.is_char_boundary(end) {
+        end -= 1;
+    }
+    format!("{}\n[truncated]", &value[..end])
+}
+
+/// Reads a granted folder's own MEMORY.md and AGENTS.md, if present, so their content can ride
+/// along the existing folder-sync path and be preloaded into the model's context without an
+/// explicit read_file call. Returns None when neither file exists (or both are empty), so a
+/// folder with no convention files contributes nothing.
+pub fn scan_folder_context(root: &Path) -> Option<String> {
+    let sections: Vec<String> = ["MEMORY.md", "AGENTS.md"]
+        .into_iter()
+        .filter_map(|name| {
+            let content = fs::read_to_string(root.join(name)).ok()?;
+            let trimmed = content.trim();
+            if trimmed.is_empty() {
+                return None;
+            }
+            Some(format!("## {name}\n{}", truncate_str(trimmed, MAX_FOLDER_CONTEXT_BYTES)))
+        })
+        .collect();
+    if sections.is_empty() {
+        return None;
+    }
+    Some(truncate_str(&sections.join("\n\n"), MAX_FOLDER_CONTEXT_BYTES * 2))
+}
+
 // ── Input helpers ─────────────────────────────────────────────────────────────
 
 pub fn input_string(input: &Value, key: &str) -> Result<String, String> {
@@ -426,7 +465,7 @@ mod tests {
 
     fn config_granting(dir: &Path) -> AgentConfig {
         AgentConfig {
-            folders: vec![GrantedFolder { path: dir.to_string_lossy().to_string(), label: None, indexed_at: None }],
+            folders: vec![GrantedFolder { path: dir.to_string_lossy().to_string(), label: None, indexed_at: None, context: None, context_updated_at: None }],
             ..Default::default()
         }
     }
@@ -636,5 +675,51 @@ mod tests {
         })).await.unwrap_err();
 
         assert!(err.contains("Re-read the affected file"), "unexpected error: {err}");
+    }
+
+    #[test]
+    fn scan_folder_context_returns_none_when_neither_file_exists() {
+        let dir = temp_project("context_none");
+        assert_eq!(scan_folder_context(&dir), None);
+    }
+
+    #[test]
+    fn scan_folder_context_reads_memory_md_alone() {
+        let dir = temp_project("context_memory_only");
+        fs::write(dir.join("MEMORY.md"), "The build command is `bun run build`.").unwrap();
+
+        let context = scan_folder_context(&dir).expect("MEMORY.md should be picked up");
+        assert!(context.contains("## MEMORY.md"));
+        assert!(context.contains("bun run build"));
+        assert!(!context.contains("AGENTS.md"));
+    }
+
+    #[test]
+    fn scan_folder_context_reads_both_files_memory_first() {
+        let dir = temp_project("context_both");
+        fs::write(dir.join("MEMORY.md"), "memory fact").unwrap();
+        fs::write(dir.join("AGENTS.md"), "agent instruction").unwrap();
+
+        let context = scan_folder_context(&dir).expect("both files should be picked up");
+        let memory_at = context.find("memory fact").expect("memory fact present");
+        let agents_at = context.find("agent instruction").expect("agent instruction present");
+        assert!(memory_at < agents_at, "MEMORY.md content should come before AGENTS.md content");
+    }
+
+    #[test]
+    fn scan_folder_context_ignores_a_blank_file() {
+        let dir = temp_project("context_blank");
+        fs::write(dir.join("MEMORY.md"), "   \n\n  ").unwrap();
+        assert_eq!(scan_folder_context(&dir), None);
+    }
+
+    #[test]
+    fn scan_folder_context_truncates_oversized_content() {
+        let dir = temp_project("context_oversized");
+        fs::write(dir.join("MEMORY.md"), "x".repeat(MAX_FOLDER_CONTEXT_BYTES * 3)).unwrap();
+
+        let context = scan_folder_context(&dir).expect("oversized file should still be picked up");
+        assert!(context.len() < MAX_FOLDER_CONTEXT_BYTES * 3);
+        assert!(context.contains("[truncated]"));
     }
 }

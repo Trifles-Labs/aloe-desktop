@@ -20,8 +20,8 @@ use tauri_plugin_dialog::MessageDialogKind;
 use tauri_plugin_opener::OpenerExt;
 
 use config::{
-    debug_log, load_config, make_granted_folder, normalize_setup_token, save_config,
-    secret_fingerprint, AppState,
+    debug_log, load_config, make_granted_folder, normalize_setup_token, rescan_folder_contexts,
+    save_config, secret_fingerprint, AppState,
 };
 use models::{AgentConfig, ErrorResponse, PendingApproval, RegisterResponse, SearchMatch};
 use search::{search_content as search_content_fn, search_files as search_files_fn};
@@ -308,7 +308,10 @@ fn search_files(
 // ── App entry point ───────────────────────────────────────────────────────────
 
 pub fn run() {
-    let initial_config = load_config();
+    let mut initial_config = load_config();
+    // Picks up edits made to a granted folder's MEMORY.md/AGENTS.md while the app was closed,
+    // so the very first sync after launch reflects the file's real current content.
+    rescan_folder_contexts(&mut initial_config);
     debug_log(
         "app",
         "startup",
