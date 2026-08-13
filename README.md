@@ -90,7 +90,7 @@ Use **Log out** in the app to reset the agent connection and remove stored crede
 ## Command Approval Modes
 
 - `ask`: every command request is queued for explicit approval.
-- `trusted_coding`: common project verification commands are allowed, while destructive or compound commands still require approval.
+- `auto`: Aloe's own model judges each command against the conversation it came from (via the backend) before running it; destructive or compound commands always still require approval, regardless of what the model decides.
 - `all`: command approvals are disabled.
 
 File operations are still limited to folders the user has explicitly granted.

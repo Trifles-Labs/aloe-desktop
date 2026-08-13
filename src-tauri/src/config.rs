@@ -129,7 +129,11 @@ pub fn load_config() -> AgentConfig {
             "ask"
         }
         .to_string();
-    } else if !matches!(config.command_trust_mode.as_str(), "ask" | "trusted_coding" | "all") {
+    } else if config.command_trust_mode == "trusted_coding" {
+        // Renamed once the static allowlist was replaced by an LLM safety check with conversation
+        // context — an existing config.json still on the old value reads as "auto" from here on.
+        config.command_trust_mode = "auto".to_string();
+    } else if !matches!(config.command_trust_mode.as_str(), "ask" | "auto" | "all") {
         config.command_trust_mode = "ask".to_string();
     }
     for session in &mut config.terminal_sessions {

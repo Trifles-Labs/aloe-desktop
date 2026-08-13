@@ -50,31 +50,67 @@ fn maybe_resync_folder_context(app: &AppHandle, job_kind: &str, status: &str) {
     });
 }
 
-fn trusted_coding_command(command: &str) -> bool {
+/// Hard veto for "auto" mode: these never skip confirmation, no matter what the LLM safety check
+/// (see `check_command_safety`) says. A prompt-injected or simply wrong model judgment should never
+/// be able to authorize something this destructive on its own — the LLM check only gets to widen
+/// the safe middle ground below this floor, never lower it.
+fn is_dangerous_command(command: &str) -> bool {
     let normalized = command.trim().to_lowercase();
     let dangerous = ["sudo ", "runas ", "rm -rf", "del /s", "rmdir /s", "git push", "git reset", "git clean", "npm publish", "bun publish", "deploy", "curl ", "wget ", ".env", "setx ", "chmod 777"];
-    if dangerous.iter().any(|token| normalized.contains(token)) || ["&&", "||", ";", "|"].iter().any(|token| normalized.contains(token)) { return false; }
-    let safe = ["rg ", "git status", "git diff", "git log", "git show", "git branch", "bun install", "bun add", "bun run ", "bunx tsc", "npm install", "npm run ", "npm test", "pnpm install", "pnpm add", "pnpm run ", "yarn install", "yarn add", "yarn run ", "cargo check", "cargo test", "cargo build", "go test", "dotnet test", "dotnet build"];
-    safe.iter().any(|prefix| normalized == prefix.trim() || normalized.starts_with(prefix))
+    dangerous.iter().any(|token| normalized.contains(token)) || ["&&", "||", ";", "|"].iter().any(|token| normalized.contains(token))
 }
 
 #[cfg(test)]
 mod tests {
-    use super::trusted_coding_command;
+    use super::is_dangerous_command;
 
     #[test]
-    fn allows_normal_project_verification() {
-        assert!(trusted_coding_command("bun install"));
-        assert!(trusted_coding_command("cargo test"));
-        assert!(trusted_coding_command("git diff -- src/lib.rs"));
+    fn does_not_flag_normal_project_verification() {
+        assert!(!is_dangerous_command("bun install"));
+        assert!(!is_dangerous_command("cargo test"));
+        assert!(!is_dangerous_command("git diff -- src/lib.rs"));
     }
 
     #[test]
-    fn blocks_destructive_or_compound_commands() {
-        assert!(!trusted_coding_command("git reset --hard"));
-        assert!(!trusted_coding_command("bun test && git push"));
-        assert!(!trusted_coding_command("npm publish"));
+    fn flags_destructive_or_compound_commands() {
+        assert!(is_dangerous_command("git reset --hard"));
+        assert!(is_dangerous_command("bun test && git push"));
+        assert!(is_dangerous_command("npm publish"));
     }
+}
+
+// ── LLM safety check (Auto mode) ─────────────────────────────────────────────
+// "Auto" asks Aloe's own model — via the backend, which holds the API key and the conversation
+// this command came from — whether the command is safe to run unattended, instead of matching it
+// against a fixed allowlist. The backend re-derives the command from the job it already dispatched
+// rather than trusting whatever this call sends, so a compromised desktop client can't talk the
+// judge into approving a different command than the one that will actually run.
+
+const SAFETY_CHECK_TIMEOUT_SECONDS: u64 = 15;
+
+#[derive(serde::Deserialize)]
+struct SafetyCheckResponse {
+    safe: bool,
+    reason: String,
+}
+
+async fn check_command_safety(state: &tauri::State<'_, AppState>, config: &AgentConfig, job_id: &str) -> Result<SafetyCheckResponse, String> {
+    let credential = config.credential.as_ref().ok_or("No credential configured.")?;
+    let response = tokio::time::timeout(
+        Duration::from_secs(SAFETY_CHECK_TIMEOUT_SECONDS),
+        state.client
+            .post(format!("{}/api/agent/jobs/{job_id}/check-command", config.api_url))
+            .bearer_auth(credential)
+            .send(),
+    )
+    .await
+    .map_err(|_| "Safety check timed out.".to_string())?
+    .map_err(|e| e.to_string())?;
+
+    if !response.status().is_success() {
+        return Err(format!("Safety check returned HTTP {}.", response.status()));
+    }
+    response.json::<SafetyCheckResponse>().await.map_err(|e| e.to_string())
 }
 
 // ── Shell command execution ───────────────────────────────────────────────────
@@ -133,22 +169,36 @@ pub async fn execute_job(app: AppHandle, job: AgentJob) {
     let state = app.state::<AppState>();
     let config = state.config.lock().expect("config mutex").clone();
 
-    // Commands require explicit approval (or auto-approval if always_allow is set)
+    // Commands require explicit approval, unless "all" (run anything) or "auto" (ask Aloe's own
+    // model to judge this specific command against the conversation it came from) says otherwise.
     if job.kind == "run_command" || job.kind == "run_local_command" || job.kind == "start_terminal_session" {
         let command = input_string(&job.input, "command").unwrap_or_default();
-        if config.command_trust_mode == "all" || (config.command_trust_mode == "trusted_coding" && trusted_coding_command(&command)) {
-            let input_snapshot = job.input.clone();
-            let result = if job.kind == "start_terminal_session" {
-                start_terminal_session(&state, config.clone(), job.input.clone()).await
-            } else {
-                run_command(config.clone(), job.input.clone()).await
-            };
-            let (status, output, error) = outcome(result);
-            post_result(&state, &config, &job.id, status, output.clone(), error.clone()).await;
-            record_and_emit(&app, &state, &job.id, &job.kind, status, error.as_deref(), Some(input_snapshot), output);
+
+        if config.command_trust_mode == "all" {
+            run_approved_command(&app, &state, &config, job).await;
             return;
         }
-        queue_for_approval(&state, &app, job);
+
+        if config.command_trust_mode == "auto" && !is_dangerous_command(&command) {
+            match check_command_safety(&state, &config, &job.id).await {
+                Ok(decision) if decision.safe => {
+                    run_approved_command(&app, &state, &config, job).await;
+                    return;
+                }
+                Ok(decision) => {
+                    debug_log("job", "safety_check_declined", format!("job_id={} reason={}", job.id, decision.reason));
+                    queue_for_approval_with_reason(&state, &app, job, Some(decision.reason));
+                    return;
+                }
+                Err(e) => {
+                    // Fail closed: a broken/offline safety check falls back to asking, never to
+                    // running unattended.
+                    debug_log("job", "safety_check_error", format!("job_id={} err={e}", job.id));
+                }
+            }
+        }
+
+        queue_for_approval_with_reason(&state, &app, job, None);
         return;
     }
 
@@ -159,6 +209,20 @@ pub async fn execute_job(app: AppHandle, job: AgentJob) {
     debug_log("job", "completed", format!("job_id={} kind={} status={status}", job.id, job.kind));
     record_and_emit(&app, &state, &job.id, &job.kind, status, error.as_deref(), Some(input_snapshot), output);
     maybe_resync_folder_context(&app, &job.kind, status);
+}
+
+/// Runs a run_command/start_terminal_session job that's already been cleared to execute without
+/// asking — either "all" mode, or "auto" mode after `check_command_safety` came back safe.
+async fn run_approved_command(app: &AppHandle, state: &tauri::State<'_, AppState>, config: &AgentConfig, job: AgentJob) {
+    let input_snapshot = job.input.clone();
+    let result = if job.kind == "start_terminal_session" {
+        start_terminal_session(state, config.clone(), job.input.clone()).await
+    } else {
+        run_command(config.clone(), job.input.clone()).await
+    };
+    let (status, output, error) = outcome(result);
+    post_result(state, config, &job.id, status, output.clone(), error.clone()).await;
+    record_and_emit(app, state, &job.id, &job.kind, status, error.as_deref(), Some(input_snapshot), output);
 }
 
 fn outcome(result: Result<Value, String>) -> (&'static str, Option<Value>, Option<String>) {
@@ -185,14 +249,20 @@ fn record_and_emit(
     let _ = app.emit("agent://recent-actions", ());
 }
 
-fn queue_for_approval(state: &tauri::State<AppState>, app: &AppHandle, job: AgentJob) {
+/// Queues a command for manual approval. `safety_decline_reason` is set only when "auto" mode's
+/// LLM check ran and declined — the reason shown then is the judge's own explanation of what it
+/// found risky, which is more actionable than replaying the model's original justification for
+/// wanting to run the command in the first place.
+fn queue_for_approval_with_reason(state: &tauri::State<AppState>, app: &AppHandle, job: AgentJob, safety_decline_reason: Option<String>) {
     let pending = PendingApproval {
         job_id: job.id.clone(),
         job_kind: job.kind.clone(),
         command: input_string(&job.input, "command").unwrap_or_default(),
         cwd: input_string(&job.input, "cwd").unwrap_or_default(),
-        reason: input_string(&job.input, "reason")
-            .unwrap_or_else(|_| "Aloe requested this command.".to_string()),
+        reason: safety_decline_reason.unwrap_or_else(|| {
+            input_string(&job.input, "reason")
+                .unwrap_or_else(|_| "Aloe requested this command.".to_string())
+        }),
         requested_at: Utc::now().to_rfc3339(),
         input: job.input,
     };

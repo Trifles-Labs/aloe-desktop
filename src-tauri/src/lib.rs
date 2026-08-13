@@ -18,6 +18,7 @@ use tauri_plugin_dialog::DialogExt;
 #[cfg(target_os = "linux")]
 use tauri_plugin_dialog::MessageDialogKind;
 use tauri_plugin_opener::OpenerExt;
+use tokio_tungstenite::tungstenite::Message;
 
 use config::{
     debug_log, load_config, make_granted_folder, normalize_setup_token, rescan_folder_contexts,
@@ -218,14 +219,25 @@ async fn register_agent(
 
 #[tauri::command]
 fn set_command_trust_mode(state: State<AppState>, mode: String) -> Result<AgentConfig, String> {
-    if mode != "ask" && mode != "trusted_coding" && mode != "all" {
+    if mode != "ask" && mode != "auto" && mode != "all" {
         return Err("Unsupported command trust mode.".to_string());
     }
     let mut config = state.config.lock().expect("config mutex");
-    config.command_trust_mode = mode;
+    config.command_trust_mode = mode.clone();
     config.always_allow_commands = config.command_trust_mode == "all";
     save_config(&config)?;
-    Ok(config.clone())
+    let result = config.clone();
+    drop(config);
+
+    // Best-effort live push so the backend's tool-card status text (commandStatusLabel in
+    // local_agent.ts) reflects the change immediately instead of waiting for the next reconnect's
+    // hello. A dropped send here just means that text lags one change behind — see
+    // queue_for_approval in executor.rs for the same tradeoff on the same channel.
+    if let Some(sender) = state.outbound.lock().expect("outbound mutex").as_ref() {
+        let _ = sender.send(Message::Text(json!({ "type": "trust_mode_updated", "mode": mode }).to_string().into()));
+    }
+
+    Ok(result)
 }
 
 // ── Folder management ─────────────────────────────────────────────────────────

@@ -16,7 +16,7 @@ export type RecentAction = {
   output?: unknown;
 };
 
-export type CommandTrustMode = "ask" | "trusted_coding" | "all";
+export type CommandTrustMode = "ask" | "auto" | "all";
 
 export type AgentConfig = {
   apiUrl: string;

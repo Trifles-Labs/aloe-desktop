@@ -233,8 +233,8 @@ function App() {
       setConfig(next);
       const message = mode === "all"
         ? "All command approvals disabled."
-        : mode === "trusted_coding"
-          ? "Trusted Coding mode enabled."
+        : mode === "auto"
+          ? "Auto mode enabled."
           : "Per-command approval required again.";
       toast(message, "info");
     } catch (err) {

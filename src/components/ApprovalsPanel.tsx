@@ -21,9 +21,9 @@ const commandModes: Array<{ mode: CommandTrustMode; title: string; description: 
     description: "Nothing runs on this computer until you approve it.",
   },
   {
-    mode: "trusted_coding",
-    title: "Trusted Coding",
-    description: "Recognized inspection, install, build, and test commands run on their own. Anything destructive still waits for you.",
+    mode: "auto",
+    title: "Auto",
+    description: "Aloe asks its own model to judge each command against the conversation before running it. Anything destructive still waits for you no matter what the model decides.",
   },
   {
     mode: "all",

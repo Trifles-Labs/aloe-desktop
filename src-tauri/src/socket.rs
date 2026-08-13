@@ -149,7 +149,8 @@ async fn run_connected_loop(
     fp: &str,
 ) {
     let (mut write, mut read) = socket.split();
-    let _ = write.send(Message::Text(json!({ "type": "hello" }).to_string().into())).await;
+    let command_trust_mode = app.state::<AppState>().config.lock().expect("config mutex").command_trust_mode.clone();
+    let _ = write.send(Message::Text(json!({ "type": "hello", "commandTrustMode": command_trust_mode }).to_string().into())).await;
     let mut heartbeat = tokio::time::interval(Duration::from_millis(SOCKET_HEARTBEAT_MS));
     heartbeat.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
 
