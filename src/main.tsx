@@ -1,6 +1,7 @@
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import { MotionConfig } from "framer-motion";
 import { Leaf } from "lucide-react";
 
@@ -29,7 +30,7 @@ import MemoryPage from "@/app/(app)/app/memory/page";
 import { usePathname, useRouter } from "next/navigation";
 import { DEFAULT_CONFIG } from "./types";
 import type { AgentConfig, CommandTrustMode, PendingApproval } from "./types";
-import { errorMessage } from "./lib/desktop";
+import { errorMessage, GOOGLE_AUTH_EVENT, mintAgentSetupToken, startGoogleAuth } from "./lib/desktop";
 import "./web.css";
 
 type DesktopPreferences = { runOnStartup: boolean; startMinimized: boolean };
@@ -88,11 +89,24 @@ function App() {
   const [pending, setPending] = useState<PendingApproval[]>([]);
   const [setupToken, setSetupToken] = useState("");
   const [connecting, setConnecting] = useState(false);
+  const [googleConnecting, setGoogleConnecting] = useState(false);
   const [authError, setAuthError] = useState<string | null>(null);
   const { toasts, toast, dismiss, pause, resume } = useToasts();
   const { updateReady, restart } = useAutoUpdate();
 
   const authenticated = Boolean(config.agentId && config.credential && config.userToken);
+
+  /* The deep-link listener lives for the whole window lifetime; this ref lets it
+     ignore a token that arrives after the device is already paired (e.g. a stale
+     browser tab finishing a flow from a previous run). */
+  const authenticatedRef = useRef(authenticated);
+  authenticatedRef.current = authenticated;
+
+  /* Google tokens are handled once. The browser tab hands the token through
+     either the Tauri event (app already open) or the pending-token command
+     (app launched by the deep link) — the set keeps the two paths from
+     pairing twice. */
+  const handledGoogleTokens = useRef(new Set<string>());
 
   const persistUserToken = (nextConfig: AgentConfig) => {
     if (nextConfig.userToken) {
@@ -196,6 +210,72 @@ function App() {
     }
   };
 
+  const googleSignIn = async () => {
+    setGoogleConnecting(true);
+    setAuthError(null);
+    try {
+      // The browser opens, Google runs there, and the finished session comes
+      // back through the `aloe://` deep link — completeGoogleAuth finishes the
+      // pairing, so the button stays "in progress" until then (or a timeout).
+      await startGoogleAuth();
+    } catch (err) {
+      setGoogleConnecting(false);
+      setAuthError(errorMessage(err));
+    }
+  };
+
+  /* The session token from the browser is only a login — this device still needs an
+     agent credential. Minting a setup token from the signed-in session and registering
+     with it does exactly what pasting a token from the web app would have done. */
+  const completeGoogleAuth = useCallback(
+    async (token: string) => {
+      if (handledGoogleTokens.current.has(token) || authenticatedRef.current) return;
+      handledGoogleTokens.current.add(token);
+      try {
+        const setupToken = await mintAgentSetupToken(token);
+        const next = await invoke<AgentConfig>("register_agent", { token: setupToken });
+        persistUserToken(next);
+        setConfig(next);
+        toast("Signed in with Google — this device is paired.", "success");
+      } catch (err) {
+        toast(`Google sign in failed: ${errorMessage(err)}`, "error");
+        setAuthError(errorMessage(err));
+      } finally {
+        setGoogleConnecting(false);
+      }
+    },
+    [toast],
+  );
+
+  /* Catches the Google session handed back by the browser: emitted while the app is
+     already open, or drained from Rust when the app was launched by the deep link. */
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
+    let cancelled = false;
+
+    void (async () => {
+      unlisten = await listen<string>(GOOGLE_AUTH_EVENT, (event) => {
+        void completeGoogleAuth(event.payload);
+      });
+      if (cancelled) return;
+      const pending = await invoke<string | null>("take_pending_oauth_token");
+      if (pending) void completeGoogleAuth(pending);
+    })();
+
+    return () => {
+      cancelled = true;
+      unlisten?.();
+    };
+  }, [completeGoogleAuth]);
+
+  /* If the browser tab is abandoned mid-flow, the Google button should not stay
+     spinning forever — it reverts, and a later deep link still completes anyway. */
+  useEffect(() => {
+    if (!googleConnecting) return;
+    const timer = window.setTimeout(() => setGoogleConnecting(false), 8 * 60_000);
+    return () => window.clearTimeout(timer);
+  }, [googleConnecting]);
+
   const resetConnection = async () => {
     try {
       const next = await invoke<AgentConfig>("reset_agent_connection");
@@ -293,6 +373,8 @@ function App() {
               onTokenChange={(value) => { setSetupToken(value); if (authError) setAuthError(null); }}
               onConnect={() => void connect()}
               connecting={connecting}
+              onGoogleSignIn={() => void googleSignIn()}
+              googleConnecting={googleConnecting}
               error={authError}
             />
           </div>

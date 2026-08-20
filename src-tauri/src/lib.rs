@@ -12,8 +12,9 @@ mod terminal;
 
 use serde_json::json;
 use std::{collections::HashMap, fs as std_fs, sync::Mutex};
-use tauri::{AppHandle, Manager, State};
+use tauri::{AppHandle, Emitter, Manager, State};
 use tauri_plugin_autostart::{MacosLauncher, ManagerExt};
+use tauri_plugin_deep_link::DeepLinkExt;
 use tauri_plugin_dialog::DialogExt;
 #[cfg(target_os = "linux")]
 use tauri_plugin_dialog::MessageDialogKind;
@@ -53,6 +54,49 @@ fn open_external_url(app: AppHandle, url: String) -> Result<(), String> {
     app.opener()
         .open_url(url, None::<String>)
         .map_err(|error| error.to_string())
+}
+
+// ── Google sign-in deep link ─────────────────────────────────────────────────
+
+/// Custom protocol the browser returns the Google OAuth token through
+/// (`aloe://auth/callback?token=…`, minted by the web app's sign-in callback page).
+const OAUTH_DEEP_LINK_SCHEME: &str = "aloe";
+/// Event the frontend listens for when a deep link arrives while the app is running.
+const OAUTH_TOKEN_EVENT: &str = "aloe-google-auth";
+
+fn oauth_token_from_url(url: &url::Url) -> Option<String> {
+    if url.scheme() != OAUTH_DEEP_LINK_SCHEME
+        || url.host_str() != Some("auth")
+        || url.path() != "/callback"
+    {
+        return None;
+    }
+    url.query_pairs()
+        .find(|(key, _)| key == "token")
+        .map(|(_, value)| value.into_owned())
+        .filter(|token| !token.is_empty())
+}
+
+/// Records the signed-in token so the frontend can pick it up, and nudges the frontend if it is
+/// already listening. The deep link only ever carries a fresh token, so the latest one wins.
+fn store_oauth_token(app: &AppHandle, token: String) {
+    {
+        let state = app.state::<AppState>();
+        let mut pending = state.pending_oauth.lock().expect("pending oauth mutex");
+        *pending = Some(token.clone());
+    }
+    let _ = app.emit(OAUTH_TOKEN_EVENT, token);
+    desktop::show_main_window(app);
+}
+
+/// Drains the pending Google OAuth token, if a deep link arrived before the frontend was ready.
+#[tauri::command]
+fn take_pending_oauth_token(state: State<AppState>) -> Option<String> {
+    state
+        .pending_oauth
+        .lock()
+        .expect("pending oauth mutex")
+        .take()
 }
 
 #[tauri::command]
@@ -337,9 +381,25 @@ pub fn run() {
     );
 
     tauri::Builder::default()
-        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
-            desktop::show_main_window(app);
+        .plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| {
+            // On Windows/Linux a deep link launches a second instance; single-instance forwards
+            // the URL argument here. `store_oauth_token` also shows the window, so a sign-in
+            // deep link both lands and brings the app forward.
+            //
+            // argv[0] is the exe's own path, and on Windows a leading drive letter (`C:\...`)
+            // parses as a valid URL with scheme "c" — so this must keep scanning past the first
+            // arg that merely parses as *some* URL and find the one that's actually the deep
+            // link, rather than stopping at argv[0] and silently dropping the real token.
+            match argv
+                .iter()
+                .filter_map(|arg| url::Url::parse(arg).ok())
+                .find_map(|url| oauth_token_from_url(&url))
+            {
+                Some(token) => store_oauth_token(app, token),
+                None => desktop::show_main_window(app),
+            }
         }))
+        .plugin(tauri_plugin_deep_link::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_autostart::init(
@@ -352,6 +412,7 @@ pub fn run() {
         .manage(AppState {
             config: Mutex::new(initial_config),
             pending: Mutex::new(Vec::new()),
+            pending_oauth: Mutex::new(None),
             terminals: Mutex::new(HashMap::new()),
             client: reqwest::Client::new(),
             outbound: Mutex::new(None),
@@ -359,6 +420,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             get_config,
             get_pending_approvals,
+            take_pending_oauth_token,
             hide_main_window,
             open_external_url,
             set_run_on_startup,
@@ -375,6 +437,32 @@ pub fn run() {
         ])
         .setup(|app| {
             desktop::install_tray(app)?;
+
+            // Dev builds and portable bundles are not registered by an installer, so claim the
+            // `aloe://` scheme from the app itself. Best-effort — an installed app that already
+            // registered it is left untouched (registry writes are idempotent).
+            #[cfg(any(windows, target_os = "linux"))]
+            let _ = app.deep_link().register_all();
+
+            let handle = app.handle().clone();
+            app.deep_link().on_open_url(move |event| {
+                for url in event.urls() {
+                    if let Some(token) = oauth_token_from_url(&url) {
+                        store_oauth_token(&handle, token);
+                    }
+                }
+            });
+
+            // Cold start: the app was launched BY a deep link, so no listener existed when the
+            // plugin parsed the argument — the URL is only available through `get_current()`.
+            if let Ok(Some(urls)) = app.deep_link().get_current() {
+                for url in urls {
+                    if let Some(token) = oauth_token_from_url(&url) {
+                        store_oauth_token(app.handle(), token);
+                    }
+                }
+            }
+
             let launched_by_autostart = std::env::args().any(|arg| arg == "--autostart");
             let preferences = app
                 .state::<AppState>()

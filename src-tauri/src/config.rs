@@ -57,6 +57,9 @@ pub const MAX_CONVERSATION_FOLDERS: usize = 200;
 pub struct AppState {
     pub config: Mutex<AgentConfig>,
     pub pending: Mutex<Vec<PendingApproval>>,
+    /// A Google OAuth token handed to the app through the `aloe://` deep link while the
+    /// frontend wasn't ready to receive it. `take_pending_oauth_token` drains it once.
+    pub pending_oauth: Mutex<Option<String>>,
     pub terminals: Mutex<HashMap<String, TerminalSession>>,
     pub client: Client,
     /// Set while the socket is connected; lets code outside socket.rs (e.g.
