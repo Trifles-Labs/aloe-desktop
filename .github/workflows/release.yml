@@ -74,6 +74,6 @@ jobs:
           projectPath: aloe-desktop
           tagName: ${{ github.ref_name }}
           releaseName: "Aloe Desktop ${{ github.ref_name }}"
-          releaseDraft: true
+          releaseDraft: false
           prerelease: false
           args: ${{ matrix.args }}
