@@ -6,7 +6,7 @@ use tokio::process::Command;
 use tokio_tungstenite::tungstenite::Message;
 
 use crate::browser::dispatch_browser;
-use crate::config::{add_recent, debug_log, rescan_folder_contexts, save_config, AppState, COMMAND_TIMEOUT_SECONDS};
+use crate::config::{add_recent, debug_log, rescan_folder_contexts, save_config, scoped_config, AppState, COMMAND_TIMEOUT_SECONDS};
 use crate::fs::{
     apply_patch, assert_granted, attach_file, create_file, create_folder, delete_file,
     delete_folder, input_string, list_files, read_file, truncate_text, update_file, update_folder,
@@ -50,48 +50,34 @@ fn maybe_resync_folder_context(app: &AppHandle, job_kind: &str, status: &str) {
     });
 }
 
-/// Hard veto for "auto" mode: these never skip confirmation, no matter what the LLM safety check
-/// (see `check_command_safety`) says. A prompt-injected or simply wrong model judgment should never
-/// be able to authorize something this destructive on its own — the LLM check only gets to widen
-/// the safe middle ground below this floor, never lower it.
-fn is_dangerous_command(command: &str) -> bool {
-    let normalized = command.trim().to_lowercase();
-    let dangerous = ["sudo ", "runas ", "rm -rf", "del /s", "rmdir /s", "git push", "git reset", "git clean", "npm publish", "bun publish", "deploy", "curl ", "wget ", ".env", "setx ", "chmod 777"];
-    dangerous.iter().any(|token| normalized.contains(token)) || ["&&", "||", ";", "|"].iter().any(|token| normalized.contains(token))
-}
-
-#[cfg(test)]
-mod tests {
-    use super::is_dangerous_command;
-
-    #[test]
-    fn does_not_flag_normal_project_verification() {
-        assert!(!is_dangerous_command("bun install"));
-        assert!(!is_dangerous_command("cargo test"));
-        assert!(!is_dangerous_command("git diff -- src/lib.rs"));
-    }
-
-    #[test]
-    fn flags_destructive_or_compound_commands() {
-        assert!(is_dangerous_command("git reset --hard"));
-        assert!(is_dangerous_command("bun test && git push"));
-        assert!(is_dangerous_command("npm publish"));
-    }
-}
-
 // ── LLM safety check (Auto mode) ─────────────────────────────────────────────
 // "Auto" asks Aloe's own model — via the backend, which holds the API key and the conversation
 // this command came from — whether the command is safe to run unattended, instead of matching it
 // against a fixed allowlist. The backend re-derives the command from the job it already dispatched
 // rather than trusting whatever this call sends, so a compromised desktop client can't talk the
 // judge into approving a different command than the one that will actually run.
+//
+// This check is the ONLY gate in auto mode. There is deliberately no local hard veto in front of
+// it any more: the previous token/compound blocklist rejected pipes, `&&`, and any command merely
+// containing "curl" or "deploy", which is most real development work, so auto mode behaved as ask
+// mode for everything worth automating. Everything now rides on `checkCommandSafety` in the
+// backend, which fails closed on error, timeout, or an unparseable answer.
 
-const SAFETY_CHECK_TIMEOUT_SECONDS: u64 = 15;
+/// Generous because the judge may be a reasoning model: deepseek-reasoner answers in 2-5s warm but
+/// has been measured at 11s on a cold call, and a timeout here fails closed — i.e. shows the very
+/// approval prompt auto mode exists to avoid. Better to wait than to ask spuriously.
+const SAFETY_CHECK_TIMEOUT_SECONDS: u64 = 40;
 
 #[derive(serde::Deserialize)]
 struct SafetyCheckResponse {
     safe: bool,
     reason: String,
+    /// True when the backend's check errored out instead of reaching a verdict. It arrives as
+    /// `safe: false` either way, but a check that judged nothing must not refuse the command —
+    /// see the match in `execute_job`. Defaults to false so an older backend, which never sends
+    /// this field, reads as a genuine verdict rather than a silent failure.
+    #[serde(default)]
+    failed: bool,
 }
 
 async fn check_command_safety(state: &tauri::State<'_, AppState>, config: &AgentConfig, job_id: &str) -> Result<SafetyCheckResponse, String> {
@@ -167,28 +153,38 @@ pub async fn post_result(
 pub async fn execute_job(app: AppHandle, job: AgentJob) {
     debug_log("job", "received", format!("job_id={} kind={}", job.id, job.kind));
     let state = app.state::<AppState>();
-    let config = state.config.lock().expect("config mutex").clone();
+    // Folder scope for this job: device grants, plus anything the user shared with the conversation
+    // this job came from. Resolved once here so every path check below — and every tool dispatched
+    // from it — sees the same set. Never saved; see scoped_config in config.rs.
+    let config = {
+        let stored = state.config.lock().expect("config mutex");
+        scoped_config(&stored, job.conversation_id.as_deref())
+    };
 
     // Commands require explicit approval, unless "all" (run anything) or "auto" (ask Aloe's own
     // model to judge this specific command against the conversation it came from) says otherwise.
     if job.kind == "run_command" || job.kind == "run_local_command" || job.kind == "start_terminal_session" {
-        let command = input_string(&job.input, "command").unwrap_or_default();
-
         if config.command_trust_mode == "all" {
             run_approved_command(&app, &state, &config, job).await;
             return;
         }
 
-        if config.command_trust_mode == "auto" && !is_dangerous_command(&command) {
+        if config.command_trust_mode == "auto" {
             match check_command_safety(&state, &config, &job.id).await {
                 Ok(decision) if decision.safe => {
                     run_approved_command(&app, &state, &config, job).await;
                     return;
                 }
-                Ok(decision) => {
+                // The check ran and said no: refuse outright and hand the reason to the model.
+                Ok(decision) if !decision.failed => {
                     debug_log("job", "safety_check_declined", format!("job_id={} reason={}", job.id, decision.reason));
-                    queue_for_approval_with_reason(&state, &app, job, Some(decision.reason));
+                    reject_command(&app, &state, &config, job, &decision.reason).await;
                     return;
+                }
+                // The check itself broke, so nothing has actually been judged. Fall through to
+                // asking the user rather than refusing a command on no evidence.
+                Ok(decision) => {
+                    debug_log("job", "safety_check_unavailable", format!("job_id={} reason={}", job.id, decision.reason));
                 }
                 Err(e) => {
                     // Fail closed: a broken/offline safety check falls back to asking, never to
@@ -198,7 +194,7 @@ pub async fn execute_job(app: AppHandle, job: AgentJob) {
             }
         }
 
-        queue_for_approval_with_reason(&state, &app, job, None);
+        queue_for_approval(&state, &app, job);
         return;
     }
 
@@ -249,20 +245,46 @@ fn record_and_emit(
     let _ = app.emit("agent://recent-actions", ());
 }
 
-/// Queues a command for manual approval. `safety_decline_reason` is set only when "auto" mode's
-/// LLM check ran and declined — the reason shown then is the judge's own explanation of what it
-/// found risky, which is more actionable than replaying the model's original justification for
-/// wanting to run the command in the first place.
-fn queue_for_approval_with_reason(state: &tauri::State<AppState>, app: &AppHandle, job: AgentJob, safety_decline_reason: Option<String>) {
+/// Refuses a command outright in "auto" mode and tells the model why.
+///
+/// The alternative — queueing it for manual approval — meant the judge's reasoning went only to a
+/// UI the user often is not looking at, while the model saw nothing at all and was left waiting on
+/// a card it could not explain. Returning the reason as the tool's error puts it in the one place
+/// that can act on it: the model can say what happened, propose a narrower command, or ask the
+/// user directly, all within the same turn.
+///
+/// The cost is that "auto" no longer offers a way to approve something the judge rejected. That is
+/// what makes the wording of the judge's own prompt load-bearing — see `buildPrompt` in the
+/// backend's command_safety.ts, which tells it a NOT-safe verdict stops the command.
+async fn reject_command(
+    app: &AppHandle,
+    state: &tauri::State<'_, AppState>,
+    config: &AgentConfig,
+    job: AgentJob,
+    reason: &str,
+) {
+    let input_snapshot = job.input.clone();
+    let error = format!(
+        "Aloe Desktop refused to run this command. Its safety check declined it: {reason} \
+         Do not retry the same command or route it through another tool. Tell the user what was \
+         blocked and why, and either propose a narrower command or ask them to run it themselves."
+    );
+    post_result(state, config, &job.id, "denied", None, Some(error.clone())).await;
+    record_and_emit(app, state, &job.id, &job.kind, "denied", Some(&error), Some(input_snapshot), None);
+}
+
+/// Queues a command for manual approval — "ask" mode, and the fail-closed path when "auto"'s
+/// safety check could not be reached at all. A check that ran and said no does not come here any
+/// more; see `reject_command`.
+fn queue_for_approval(state: &tauri::State<AppState>, app: &AppHandle, job: AgentJob) {
     let pending = PendingApproval {
         job_id: job.id.clone(),
         job_kind: job.kind.clone(),
+        conversation_id: job.conversation_id.clone(),
         command: input_string(&job.input, "command").unwrap_or_default(),
         cwd: input_string(&job.input, "cwd").unwrap_or_default(),
-        reason: safety_decline_reason.unwrap_or_else(|| {
-            input_string(&job.input, "reason")
-                .unwrap_or_else(|_| "Aloe requested this command.".to_string())
-        }),
+        reason: input_string(&job.input, "reason")
+            .unwrap_or_else(|_| "Aloe requested this command.".to_string()),
         requested_at: Utc::now().to_rfc3339(),
         input: job.input,
     };
@@ -300,10 +322,19 @@ pub async fn resolve_pending_approval(app: &AppHandle, job_id: &str, approved: b
             .ok_or("Approval request not found.")?;
         list.remove(idx)
     };
-    let config = state.config.lock().expect("config mutex").clone();
+    let config = {
+        let stored = state.config.lock().expect("config mutex");
+        scoped_config(&stored, pending.conversation_id.as_deref())
+    };
 
     if !approved {
-        post_result(&state, &config, &pending.job_id, "denied", None, Some("User denied command.".to_string())).await;
+        // Reaches the model as the tool call's error (see runLocalJob in the backend), so it is
+        // phrased as something the model can act on rather than a status code.
+        let error = "The user denied this command, so it did not run. Do not retry it or work \
+                     around it with another tool — acknowledge the decision and ask what they \
+                     would like instead."
+            .to_string();
+        post_result(&state, &config, &pending.job_id, "denied", None, Some(error)).await;
         return Ok(());
     }
 
@@ -312,6 +343,7 @@ pub async fn resolve_pending_approval(app: &AppHandle, job_id: &str, approved: b
         id: pending.job_id.clone(),
         kind: pending.job_kind.clone(),
         input: input_val.clone(),
+        conversation_id: pending.conversation_id.clone(),
     };
     let result = dispatch_tool(app, &state, &config, &job).await;
     let (status, output, error) = outcome(result);

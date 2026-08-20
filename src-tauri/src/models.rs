@@ -42,8 +42,52 @@ pub struct AgentConfig {
     pub start_minimized: bool,
     pub has_shown_tray_notification: bool,
     pub folders: Vec<GrantedFolder>,
+    /// Folders the user shared with one conversation rather than with this device. Kept separate
+    /// from `folders` on purpose: these must never widen what a *different* chat, a scheduled
+    /// task, or a background turn can reach, and they must never be sent up as device grants.
+    pub conversation_folders: Vec<ConversationFolder>,
     pub recent_actions: Vec<RecentAction>,
     pub terminal_sessions: Vec<PersistedTerminalSession>,
+}
+
+/// One folder granted to one conversation. The backend is the source of truth and pushes the full
+/// live list per conversation (see the `conversation_folders` socket message); this is the local
+/// copy the agent actually enforces against, so a job claiming a conversation it was never granted
+/// still gets nowhere.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ConversationFolder {
+    pub conversation_id: String,
+    pub path: String,
+    pub label: Option<String>,
+}
+
+/// Backend relaying the current grant list for one conversation — replaces whatever this device
+/// holds for that conversation, including with an empty list on revoke.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ConversationFoldersMessage {
+    pub conversation_id: String,
+    #[serde(default)]
+    pub folders: Vec<ConversationFolderEntry>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ConversationFolderEntry {
+    pub path: String,
+    #[serde(default)]
+    pub label: Option<String>,
+}
+
+/// Backend asking this device to open its native folder dialog, because the user is sharing a
+/// folder with a chat from the web app. The path never comes from the browser — only from the OS
+/// dialog the user operates here.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FolderPickRequest {
+    pub request_id: String,
+    pub conversation_id: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -76,6 +120,10 @@ pub struct RecentAction {
 pub struct PendingApproval {
     pub job_id: String,
     pub job_kind: String,
+    /// Conversation the job came from, carried through the approval queue so the command runs
+    /// against the same folder scope it was validated against.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub conversation_id: Option<String>,
     pub command: String,
     pub cwd: String,
     pub reason: String,
@@ -108,6 +156,11 @@ pub struct AgentJob {
     #[serde(rename = "type")]
     pub kind: String,
     pub input: Value,
+    /// Set for jobs dispatched from a chat. Selects which per-conversation folder grants apply —
+    /// `None` means device grants only. `default` keeps the HTTP drain path (which predates this
+    /// field) deserializing.
+    #[serde(default, rename = "conversationId")]
+    pub conversation_id: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]

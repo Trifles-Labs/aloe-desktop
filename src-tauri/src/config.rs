@@ -7,7 +7,7 @@ use tokio_tungstenite::tungstenite::Message;
 
 use serde_json::Value;
 
-use crate::models::{AgentConfig, GrantedFolder, PendingApproval, RecentAction};
+use crate::models::{AgentConfig, ConversationFolder, GrantedFolder, PendingApproval, RecentAction};
 use crate::terminal::TerminalSession;
 
 // ── Tunable constants ────────────────────────────────────────────────────────
@@ -48,6 +48,11 @@ pub const MAX_PAGE_TEXT_CHARS: usize = 12_000;
 // ── Persisted history ────────────────────────────────────────────────────────
 /// Recent actions and terminal sessions retained in config.json.
 pub const MAX_PERSISTED_HISTORY: usize = 50;
+
+/// Ceiling on per-conversation folder grants held locally, across all conversations. Matches the
+/// backend's replay cap (GRANT_REPLAY_LIMIT in agent_connections.ts) so a reconnect can never push
+/// more rows than this file is willing to keep.
+pub const MAX_CONVERSATION_FOLDERS: usize = 200;
 
 pub struct AppState {
     pub config: Mutex<AgentConfig>,
@@ -222,6 +227,71 @@ pub fn rescan_folder_contexts(config: &mut AgentConfig) {
         folder.context_updated_at = context.as_ref().map(|_| Utc::now().to_rfc3339());
         folder.context = context;
     }
+}
+
+// ── Per-conversation folder grants ───────────────────────────────────────────
+
+/// Replaces this device's grants for one conversation with the backend's current list.
+///
+/// A whole-list replace, not a merge: the backend sends the live set after every grant and revoke,
+/// so an empty list is a real instruction ("this chat has nothing any more") rather than a no-op.
+/// Merging would make a revoke unenforceable until the app restarted.
+pub fn set_conversation_folders(
+    config: &mut AgentConfig,
+    conversation_id: &str,
+    folders: Vec<(String, Option<String>)>,
+) {
+    config
+        .conversation_folders
+        .retain(|folder| folder.conversation_id != conversation_id);
+    for (path, label) in folders {
+        config.conversation_folders.push(ConversationFolder {
+            conversation_id: conversation_id.to_string(),
+            path,
+            label,
+        });
+    }
+    // Oldest entries fall off the end first; the backend replays the newest grants on reconnect,
+    // so anything dropped here is also the least likely to still be in use.
+    if config.conversation_folders.len() > MAX_CONVERSATION_FOLDERS {
+        let overflow = config.conversation_folders.len() - MAX_CONVERSATION_FOLDERS;
+        config.conversation_folders.drain(0..overflow);
+    }
+}
+
+/// The folder roots one job may touch: this device's permanent grants, plus the folders shared with
+/// the conversation the job came from. A job with no conversation gets the permanent grants only.
+///
+/// Returned as a config clone rather than a separate scope type so every existing `assert_granted`
+/// call keeps working unchanged — the extra roots simply are not present for any other chat. The
+/// clone is per-job and never saved; `save_config` is only ever called on the real state config, so
+/// a conversation's temporary folders cannot leak into `folders` on disk or into a folder sync.
+pub fn scoped_config(config: &AgentConfig, conversation_id: Option<&str>) -> AgentConfig {
+    let Some(conversation_id) = conversation_id else {
+        return config.clone();
+    };
+
+    let extra: Vec<GrantedFolder> = config
+        .conversation_folders
+        .iter()
+        .filter(|folder| folder.conversation_id == conversation_id)
+        .filter(|folder| !config.folders.iter().any(|granted| granted.path == folder.path))
+        .map(|folder| GrantedFolder {
+            label: folder.label.clone(),
+            path: folder.path.clone(),
+            indexed_at: None,
+            context: None,
+            context_updated_at: None,
+        })
+        .collect();
+
+    if extra.is_empty() {
+        return config.clone();
+    }
+
+    let mut scoped = config.clone();
+    scoped.folders.extend(extra);
+    scoped
 }
 
 pub fn debug_log(scope: &str, event: &str, detail: impl AsRef<str>) {

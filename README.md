@@ -8,7 +8,7 @@ The app is built with Tauri 2, Rust, React 19, Vite, and Bun.
 
 - Register this device with a setup token from Aloe Integrations.
 - Maintain a websocket connection to the Aloe backend.
-- Grant and revoke local folder access.
+- Grant and revoke local folder access, permanently for the device or temporarily for a single chat.
 - Search, read, create, update, delete, and patch files inside granted folders.
 - Run commands and terminal sessions with approval controls.
 - Drive a real local Chrome over the DevTools Protocol so Aloe can use sites behind the user's own logins.
@@ -89,11 +89,24 @@ Use **Log out** in the app to reset the agent connection and remove stored crede
 
 ## Command Approval Modes
 
-- `ask`: every command request is queued for explicit approval.
-- `auto`: Aloe's own model judges each command against the conversation it came from (via the backend) before running it; destructive or compound commands always still require approval, regardless of what the model decides.
+- `ask`: every command request is queued for explicit approval. A denial tells Aloe it was denied, so it stops rather than retrying the same command through another tool.
+- `auto`: Aloe's own model judges each command against the conversation it came from (via the backend) before running it. This judgement is the only gate — there is no local blocklist in front of it, because the previous one rejected pipes, `&&`, and anything containing "curl" or "deploy", which is most real development work and left auto mode behaving exactly like `ask`. A command the check clears runs unattended. A command it declines does **not** reach the approval queue — it is refused on the spot and the judge's reason is returned to Aloe as the tool's error, so the model can explain what was blocked and propose something narrower in the same turn. Note the consequence: in `auto` there is no way to approve a command the judge rejected; switch to `ask` if you want the final say on every command.
+
+  The two not-safe outcomes are kept distinct. A *verdict* refuses. A *failed check* — network error, timeout, unparseable answer — has judged nothing, so it falls back to the approval queue rather than refusing a command on no evidence.
 - `all`: command approvals are disabled.
 
 File operations are still limited to folders the user has explicitly granted.
+
+## Folder Access
+
+Two kinds of grant, with the same enforcement:
+
+- **Device folders**, added in this app, reachable by every conversation and every background task for as long as they are listed.
+- **Chat folders**, shared from the Aloe web app's chat composer. Pressing the folder button there asks this device to open its native folder dialog; the folder the user picks becomes reachable from that one conversation and nowhere else, until they remove it in the same place. They are listed read-only under **Folder access** so it is always visible on the device what a chat can reach.
+
+The browser never names a path — it can only ask for the dialog, and is told the result. Aloe Desktop keeps its own copy of the chat grants and re-checks every job against them, so a job naming a conversation it was not granted still fails here.
+
+Sensitive-path write rules (`.git/`, `node_modules/`, build output, `.env`, keys) apply identically to both kinds.
 
 ## Browser Automation
 

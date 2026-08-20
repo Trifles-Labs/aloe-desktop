@@ -1,17 +1,27 @@
 import React from "react";
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
-import { Folder, FolderPlus, Trash2 } from "lucide-react";
+import { Folder, FolderPlus, MessageSquare, Trash2 } from "lucide-react";
 
 import Button from "@/components/ui/Button";
 import { EASE_OUT } from "@/lib/motion";
 import { relativeTime } from "@/lib/utils";
-import type { GrantedFolder } from "../types";
+import type { ConversationFolder, GrantedFolder } from "../types";
 import { ControlGroup, EmptyRow } from "./ControlGroup";
 
-type Props = { folders: GrantedFolder[]; onAdd: () => void; onRemove: (path: string) => void };
+type Props = {
+  folders: GrantedFolder[];
+  conversationFolders: ConversationFolder[];
+  onAdd: () => void;
+  onRemove: (path: string) => void;
+};
 
-export function FoldersPanel({ folders, onAdd, onRemove }: Props) {
+export function FoldersPanel({ folders, conversationFolders, onAdd, onRemove }: Props) {
   const reduceMotion = useReducedMotion();
+  // One row per folder, not per grant: the same folder shared with three chats is one thing the
+  // user cares about here, and the chat it belongs to is named in the web app, not on this device.
+  const sharedPaths = Array.from(
+    new Map(conversationFolders.map((folder) => [folder.path, folder])).values(),
+  );
 
   return (
     <ControlGroup
@@ -73,6 +83,26 @@ export function FoldersPanel({ folders, onAdd, onRemove }: Props) {
           ))}
         </AnimatePresence>
       )}
+
+      {sharedPaths.length > 0 ? (
+        <div className="settings-row flex-col items-start gap-2 border-t border-clay/12 pt-3">
+          <p className="text-[11px] font-medium uppercase tracking-wide text-ink-soft">Shared with a chat</p>
+          {sharedPaths.map((folder) => (
+            <div key={folder.path} className="flex min-w-0 items-start gap-3">
+              <MessageSquare className="mt-0.5 h-4 w-4 shrink-0 text-ink-soft" />
+              <div className="min-w-0">
+                <p className="truncate text-[13px] font-medium leading-5 text-ink">{folder.label ?? "Folder"}</p>
+                <p className="truncate font-mono text-[11px] leading-5 text-ink-soft" title={folder.path}>
+                  {folder.path}
+                </p>
+              </div>
+            </div>
+          ))}
+          <p className="text-[11px] leading-4 text-ink-soft">
+            Reachable only from the chat it was shared with. Remove it there to take the access away.
+          </p>
+        </div>
+      ) : null}
     </ControlGroup>
   );
 }

@@ -8,12 +8,17 @@ use tokio_tungstenite::{
     tungstenite::{client::IntoClientRequest, http::HeaderValue, Message},
 };
 
+use tauri_plugin_dialog::DialogExt;
+
 use crate::config::{
-    debug_log, normalize_api_url, save_config, secret_fingerprint, AppState,
-    SOCKET_HEARTBEAT_MS, SOCKET_RECONNECT_MAX_MS,
+    debug_log, normalize_api_url, save_config, secret_fingerprint, set_conversation_folders,
+    AppState, SOCKET_HEARTBEAT_MS, SOCKET_RECONNECT_MAX_MS,
 };
 use crate::executor::{execute_job, resolve_pending_approval};
-use crate::models::{AgentConfig, JobDecisionMessage, JobList, SocketJobMessage};
+use crate::models::{
+    AgentConfig, ConversationFoldersMessage, FolderPickRequest, JobDecisionMessage, JobList,
+    SocketJobMessage,
+};
 
 // ── Socket state helpers ──────────────────────────────────────────────────────
 
@@ -215,11 +220,83 @@ async fn run_connected_loop(
                             });
                         }
                     }
+                    "conversation_folders" => {
+                        if let Ok(update) = serde_json::from_str::<ConversationFoldersMessage>(text) {
+                            debug_log("socket", "conversation_folders", format!("conversation_id={} count={}", update.conversation_id, update.folders.len()));
+                            apply_conversation_folders(app, update);
+                        }
+                    }
+                    "folder_pick_request" => {
+                        if let Ok(request) = serde_json::from_str::<FolderPickRequest>(text) {
+                            debug_log("socket", "folder_pick_request", format!("conversation_id={}", request.conversation_id));
+                            open_folder_picker(app, request);
+                        }
+                    }
                     _ => {}
                 }
             }
         }
     }
+}
+
+/// Stores the backend's current grant list for one conversation. Written straight to disk: the
+/// list decides what this device will touch, and a crash between the message and the next save
+/// would leave it enforcing a set the user has already changed.
+fn apply_conversation_folders(app: &AppHandle, update: ConversationFoldersMessage) {
+    let state = app.state::<AppState>();
+    let mut config = state.config.lock().expect("config mutex");
+    set_conversation_folders(
+        &mut config,
+        &update.conversation_id,
+        update.folders.into_iter().map(|folder| (folder.path, folder.label)).collect(),
+    );
+    let _ = save_config(&config);
+    drop(config);
+    let _ = app.emit("agent://conversation-folders", ());
+}
+
+/// Opens the OS folder dialog so the user can hand a folder to one chat from the web app.
+///
+/// The browser never names the folder — it can only ask for this dialog, which the person in front
+/// of the machine then operates. The window is raised first because the dialog is modal to it, and
+/// a request that arrived while Aloe was in the tray would otherwise open a dialog nobody can see.
+///
+/// Non-blocking by necessity: this runs on the socket task, and `blocking_pick_folder` would hold
+/// that task (and therefore heartbeats and every other job) for as long as the dialog is open.
+fn open_folder_picker(app: &AppHandle, request: FolderPickRequest) {
+    crate::desktop::show_main_window(app);
+    let dialog = app.dialog().clone();
+    let app = app.clone();
+    dialog.file().pick_folder(move |picked| {
+        let response = match picked {
+            Some(path) => match std::fs::canonicalize(path.to_string()) {
+                Ok(canonical) => json!({
+                    "type": "folder_pick_result",
+                    "requestId": request.request_id,
+                    "status": "picked",
+                    "path": canonical.to_string_lossy(),
+                    "label": canonical.file_name().map(|name| name.to_string_lossy().to_string()),
+                }),
+                Err(error) => json!({
+                    "type": "folder_pick_result",
+                    "requestId": request.request_id,
+                    "status": "error",
+                    "error": error.to_string(),
+                }),
+            },
+            None => json!({
+                "type": "folder_pick_result",
+                "requestId": request.request_id,
+                "status": "cancelled",
+            }),
+        };
+
+        // Best-effort, like every other outbound push here: if the socket dropped while the dialog
+        // was open, the web request times out on its own and the user can simply ask again.
+        if let Some(sender) = app.state::<AppState>().outbound.lock().expect("outbound mutex").as_ref() {
+            let _ = sender.send(Message::Text(response.to_string().into()));
+        }
+    });
 }
 
 async fn drain_queued_jobs(
