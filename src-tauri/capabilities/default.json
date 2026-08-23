@@ -9,7 +9,7 @@
     "core:window:allow-toggle-maximize",
     "core:window:allow-is-maximized",
     "core:event:default",
-    "app:default",
+    "core:app:allow-version",
     "updater:default",
     "process:allow-restart"
   ]
