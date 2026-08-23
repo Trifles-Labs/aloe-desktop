@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import { getVersion } from "@tauri-apps/api/app";
 import { MotionConfig } from "framer-motion";
 import { Leaf } from "lucide-react";
 
@@ -36,6 +37,7 @@ import "./web.css";
 type DesktopPreferences = { runOnStartup: boolean; startMinimized: boolean };
 const preferenceShape = (config: AgentConfig): DesktopPreferences => ({ runOnStartup: config.runOnStartup, startMinimized: config.startMinimized });
 (window as Window & { __ALOE_DESKTOP__?: unknown }).__ALOE_DESKTOP__ = {
+  getVersion: () => getVersion(),
   getPreferences: async () => preferenceShape(await invoke<AgentConfig>("get_config")),
   setRunOnStartup: async (enabled: boolean) => preferenceShape(await invoke<AgentConfig>("set_run_on_startup", { enabled })),
   setStartMinimized: async (enabled: boolean) => preferenceShape(await invoke<AgentConfig>("set_start_minimized", { enabled })),
