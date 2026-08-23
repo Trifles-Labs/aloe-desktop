@@ -165,14 +165,15 @@ pub async fn execute_job(app: AppHandle, job: AgentJob) {
     // model to judge this specific command against the conversation it came from) says otherwise.
     if job.kind == "run_command" || job.kind == "run_local_command" || job.kind == "start_terminal_session" {
         if config.command_trust_mode == "all" {
-            run_approved_command(&app, &state, &config, job).await;
+            run_approved_command(&app, &state, &config, job, json!({ "mode": "all" })).await;
             return;
         }
 
         if config.command_trust_mode == "auto" {
             match check_command_safety(&state, &config, &job.id).await {
                 Ok(decision) if decision.safe => {
-                    run_approved_command(&app, &state, &config, job).await;
+                    let approval = json!({ "mode": "auto", "reason": decision.reason });
+                    run_approved_command(&app, &state, &config, job, approval).await;
                     return;
                 }
                 // The check ran and said no: refuse outright and hand the reason to the model.
@@ -209,16 +210,30 @@ pub async fn execute_job(app: AppHandle, job: AgentJob) {
 
 /// Runs a run_command/start_terminal_session job that's already been cleared to execute without
 /// asking — either "all" mode, or "auto" mode after `check_command_safety` came back safe.
-async fn run_approved_command(app: &AppHandle, state: &tauri::State<'_, AppState>, config: &AgentConfig, job: AgentJob) {
+///
+/// `approval` records which of those it was, and the judge's own words when a judge was involved.
+/// That verdict used to exist only in this device's debug log, so a command the user never saw
+/// approved simply appeared in chat as having run. It rides back on the result instead, where the
+/// chat card can show what cleared the command alongside what the command did.
+async fn run_approved_command(app: &AppHandle, state: &tauri::State<'_, AppState>, config: &AgentConfig, job: AgentJob, approval: Value) {
     let input_snapshot = job.input.clone();
     let result = if job.kind == "start_terminal_session" {
         start_terminal_session(state, config.clone(), job.input.clone()).await
     } else {
         run_command(config.clone(), job.input.clone()).await
     };
+    let result = result.map(|value| with_approval(value, approval));
     let (status, output, error) = outcome(result);
     post_result(state, config, &job.id, status, output.clone(), error.clone()).await;
     record_and_emit(app, state, &job.id, &job.kind, status, error.as_deref(), Some(input_snapshot), output);
+}
+
+/// Adds the `approval` field to a command result, leaving anything that is not a JSON object alone.
+fn with_approval(mut value: Value, approval: Value) -> Value {
+    if let Some(map) = value.as_object_mut() {
+        map.insert("approval".to_string(), approval);
+    }
+    value
 }
 
 fn outcome(result: Result<Value, String>) -> (&'static str, Option<Value>, Option<String>) {
@@ -346,6 +361,8 @@ pub async fn resolve_pending_approval(app: &AppHandle, job_id: &str, approved: b
         conversation_id: pending.conversation_id.clone(),
     };
     let result = dispatch_tool(app, &state, &config, &job).await;
+    // Same stamp the unattended paths apply: this one ran because a person said so.
+    let result = result.map(|value| with_approval(value, json!({ "mode": "asked" })));
     let (status, output, error) = outcome(result);
     post_result(&state, &config, &pending.job_id, status, output.clone(), error.clone()).await;
     record_and_emit(app, &state, &pending.job_id, &pending.job_kind, status, error.as_deref(), Some(input_val), output);
