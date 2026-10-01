@@ -117,7 +117,7 @@ export function DesktopTitleBar() {
     };
   }, []);
 
-  const openNewChat = () => window.dispatchEvent(new Event("aloe:desktop-new-chat"));
+  const openNewChat = () => window.dispatchEvent(new Event("aloe:new-chat"));
   const toggleMaximize = useCallback(async () => {
     await appWindow.toggleMaximize();
     setMaximized(await appWindow.isMaximized());

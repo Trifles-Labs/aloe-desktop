@@ -38,6 +38,9 @@ pub struct AgentConfig {
     pub socket_error: Option<String>,
     pub always_allow_commands: bool,
     pub command_trust_mode: String,
+    /// Lets Aloe move the mouse and type on this computer (computer.rs). Off unless the user turns
+    /// it on, and switched back off by the corner failsafe.
+    pub desktop_control_enabled: bool,
     pub run_on_startup: bool,
     pub start_minimized: bool,
     pub has_shown_tray_notification: bool,

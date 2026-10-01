@@ -2,7 +2,6 @@ import React, { useCallback, useEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { getVersion } from "@tauri-apps/api/app";
 import { MotionConfig } from "framer-motion";
 import { Leaf } from "lucide-react";
 
@@ -14,35 +13,26 @@ import { DesktopControls } from "./components/DesktopControls";
 import { DesktopTitleBar } from "./components/DesktopTitleBar";
 import { UpdateBanner } from "./components/UpdateBanner";
 import { ThemeProvider } from "next-themes";
-import Providers from "@/app/providers";
-import AppLayout from "@/app/(app)/layout";
-import ChatSurfaceLayout from "@/app/(app)/app/(surface)/layout";
-import ChatPage from "@/app/(app)/app/(surface)/chat/page";
-import ConversationsPage from "@/app/(app)/app/conversations/page";
-import HomePage from "@/app/(app)/app/(surface)/home/page";
-import OnboardingPage from "@/app/(app)/app/onboarding/page";
-import PlansPage from "@/app/(app)/app/plans/page";
-import SettingsPage from "@/app/(app)/app/settings/page";
-import TasksPage from "@/app/(app)/app/tasks/page";
-import UsagePage from "@/app/(app)/app/usage/page";
-import BoardPage from "@/app/(app)/app/board/page";
-import ApprovalsPage from "@/app/(app)/app/approvals/page";
-import MemoryPage from "@/app/(app)/app/memory/page";
+import Providers from "@aloe/ui/providers";
+import AppLayout from "@aloe/ui/pages/AppLayout";
+import ChatSurfaceLayout from "@aloe/ui/pages/ChatSurfaceLayout";
+import ConversationsPage from "@aloe/ui/pages/ConversationsPage";
+import OnboardingPage from "@aloe/ui/pages/OnboardingPage";
+import PlansPage from "@aloe/ui/pages/PlansPage";
+import SettingsPage from "@aloe/ui/pages/SettingsPage";
+import TasksPage from "@aloe/ui/pages/TasksPage";
+import UsagePage from "@aloe/ui/pages/UsagePage";
+import BoardPage from "@aloe/ui/pages/BoardPage";
+import ApprovalsPage from "@aloe/ui/pages/ApprovalsPage";
+import MemoryPage from "@aloe/ui/pages/MemoryPage";
+import { PlatformProvider } from "@aloe/ui/lib/platform";
 import { usePathname, useRouter } from "next/navigation";
+import { navigateTo } from "./shims/next-navigation";
 import { DEFAULT_CONFIG } from "./types";
 import type { AgentConfig, CommandTrustMode, PendingApproval } from "./types";
 import { errorMessage, GOOGLE_AUTH_EVENT, mintAgentSetupToken, startGoogleAuth } from "./lib/desktop";
+import { useDesktopPlatform } from "./platform";
 import "./web.css";
-
-type DesktopPreferences = { runOnStartup: boolean; startMinimized: boolean };
-const preferenceShape = (config: AgentConfig): DesktopPreferences => ({ runOnStartup: config.runOnStartup, startMinimized: config.startMinimized });
-(window as Window & { __ALOE_DESKTOP__?: unknown }).__ALOE_DESKTOP__ = {
-  getVersion: () => getVersion(),
-  getPreferences: async () => preferenceShape(await invoke<AgentConfig>("get_config")),
-  setRunOnStartup: async (enabled: boolean) => preferenceShape(await invoke<AgentConfig>("set_run_on_startup", { enabled })),
-  setStartMinimized: async (enabled: boolean) => preferenceShape(await invoke<AgentConfig>("set_start_minimized", { enabled })),
-  openExternal: (url: string) => invoke<void>("open_external_url", { url }),
-};
 
 /* Routes the web app answers with a redirect. Without them here, a link to
    Integrations or MCP quietly landed on the chat page — the desktop router
@@ -64,8 +54,10 @@ function DesktopRouter({ desktopPage }: { desktopPage: React.ReactNode }) {
   }, [pathname, router]);
 
   const pages: Record<string, React.ReactNode> = {
-    "/app/home": <ChatSurfaceLayout><HomePage /></ChatSurfaceLayout>,
-    "/app/chat": <ChatSurfaceLayout><ChatPage /></ChatSurfaceLayout>,
+    /* Home and chat are one screen: the surface layout is the whole UI (it reads
+       the conversation id from the URL itself). */
+    "/app/home": <ChatSurfaceLayout>{null}</ChatSurfaceLayout>,
+    "/app/chat": <ChatSurfaceLayout>{null}</ChatSurfaceLayout>,
     "/app/conversations": <ConversationsPage />,
     "/app/plans": <PlansPage />,
     "/app/settings": <SettingsPage />,
@@ -89,8 +81,6 @@ function DesktopRouter({ desktopPage }: { desktopPage: React.ReactNode }) {
 function App() {
   const [config, setConfig] = useState<AgentConfig>(DEFAULT_CONFIG);
   const [pending, setPending] = useState<PendingApproval[]>([]);
-  const [setupToken, setSetupToken] = useState("");
-  const [connecting, setConnecting] = useState(false);
   const [googleConnecting, setGoogleConnecting] = useState(false);
   const [authError, setAuthError] = useState<string | null>(null);
   const { toasts, toast, dismiss, pause, resume } = useToasts();
@@ -110,16 +100,13 @@ function App() {
      pairing twice. */
   const handledGoogleTokens = useRef(new Set<string>());
 
+  /* The shared web pages read the session token from localStorage, as they do in
+     a browser. The profile reaches them through the platform instead. */
   const persistUserToken = (nextConfig: AgentConfig) => {
     if (nextConfig.userToken) {
       window.localStorage.setItem("aloe_token", nextConfig.userToken);
     } else {
       window.localStorage.removeItem("aloe_token");
-    }
-    if (nextConfig.userProfile) {
-      window.localStorage.setItem("aloe_desktop_user", JSON.stringify(nextConfig.userProfile));
-    } else {
-      window.localStorage.removeItem("aloe_desktop_user");
     }
   };
 
@@ -177,40 +164,17 @@ function App() {
     }
   }, [config.userToken]);
 
-  useEffect(() => {
-    const signOut = () => {
-      void invoke<AgentConfig>("reset_agent_connection").then(setConfig).catch((error) => {
-        toast(`Logout failed: ${errorMessage(error)}`, "error");
-      });
-    };
-    window.addEventListener("aloe:desktop-signout", signOut);
-    return () => window.removeEventListener("aloe:desktop-signout", signOut);
+  /* Signing out of the shared app unpairs this device; the setup screen takes over. */
+  const signOut = useCallback(() => {
+    navigateTo("/signin", true);
+    void invoke<AgentConfig>("reset_agent_connection").then(setConfig).catch((error) => {
+      toast(`Logout failed: ${errorMessage(error)}`, "error");
+    });
   }, [toast]);
 
-  useEffect(() => {
-    window.localStorage.setItem("aloe_desktop_pending_approvals", String(pending.length));
-    window.dispatchEvent(new CustomEvent("aloe:desktop-approvals", { detail: pending.length }));
-  }, [pending.length]);
+  const { platform, overlay } = useDesktopPlatform(config, pending.length, signOut);
 
   // ── Handlers ────────────────────────────────────────────────────────────────
-
-  const connect = async () => {
-    setConnecting(true);
-    setAuthError(null);
-    try {
-      const next = await invoke<AgentConfig>("register_agent", { token: setupToken.trim() });
-      persistUserToken(next);
-      setSetupToken("");
-      setConfig(next);
-      toast("This device is paired — opening the socket connection.", "success");
-    } catch (err) {
-      // Stays on the screen next to the field rather than in a toast that has
-      // timed out by the time you look back at what you pasted.
-      setAuthError(errorMessage(err));
-    } finally {
-      setConnecting(false);
-    }
-  };
 
   const googleSignIn = async () => {
     setGoogleConnecting(true);
@@ -282,7 +246,7 @@ function App() {
     try {
       const next = await invoke<AgentConfig>("reset_agent_connection");
       setConfig(next);
-      toast("Logged out. Paste a fresh setup token to reconnect.", "info");
+      toast("Logged out. Sign in again to reconnect this computer.", "info");
     } catch (err) {
       toast(`Reset failed: ${errorMessage(err)}`, "error");
     }
@@ -324,6 +288,16 @@ function App() {
     }
   };
 
+  const setDesktopControl = async (enabled: boolean) => {
+    try {
+      const next = await invoke<AgentConfig>("set_desktop_control_enabled", { enabled });
+      setConfig(next);
+      toast(enabled ? "Aloe can now control this computer." : "Desktop control turned off.", "info");
+    } catch (err) {
+      toast(`Setting failed: ${errorMessage(err)}`, "error");
+    }
+  };
+
   // ── Render ──────────────────────────────────────────────────────────────────
 
   const toastLayer = <ToastContainer toasts={toasts} onDismiss={dismiss} onPause={pause} onResume={resume} />;
@@ -334,21 +308,25 @@ function App() {
         <DesktopTitleBar />
         {updateReady && <UpdateBanner onRestart={() => void restart()} />}
         <div className="relative min-h-0 flex-1 contain-[layout]">
-          <Providers>
-            <DesktopRouter
-              desktopPage={
-                <DesktopControls
-                  config={config}
-                  pending={pending}
-                  onRefresh={() => void refresh()}
-                  onReset={() => void resetConnection()}
-                  onAddFolder={() => void addFolder()}
-                  onRemoveFolder={(path) => void removeFolder(path)}
-                  onSetCommandTrustMode={(mode) => void setCommandTrustMode(mode)}
-                />
-              }
-            />
-          </Providers>
+          <PlatformProvider value={platform}>
+            <Providers>
+              <DesktopRouter
+                desktopPage={
+                  <DesktopControls
+                    config={config}
+                    pending={pending}
+                    onRefresh={() => void refresh()}
+                    onReset={() => void resetConnection()}
+                    onAddFolder={() => void addFolder()}
+                    onRemoveFolder={(path) => void removeFolder(path)}
+                    onSetCommandTrustMode={(mode) => void setCommandTrustMode(mode)}
+                    onSetDesktopControl={(enabled) => void setDesktopControl(enabled)}
+                  />
+                }
+              />
+              {overlay}
+            </Providers>
+          </PlatformProvider>
           {toastLayer}
         </div>
       </div>
@@ -371,10 +349,6 @@ function App() {
 
           <div className="relative z-10 flex flex-1 items-center justify-center">
             <AuthScreen
-              setupToken={setupToken}
-              onTokenChange={(value) => { setSetupToken(value); if (authError) setAuthError(null); }}
-              onConnect={() => void connect()}
-              connecting={connecting}
               onGoogleSignIn={() => void googleSignIn()}
               googleConnecting={googleConnecting}
               error={authError}

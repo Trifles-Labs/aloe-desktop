@@ -1,8 +1,8 @@
 import React from "react";
 import { motion, useReducedMotion } from "framer-motion";
 
-import { GROUP_IN, GROUP_IN_REDUCED } from "@/lib/motion";
-import { cn } from "@/lib/utils";
+import { GROUP_IN, GROUP_IN_REDUCED } from "@aloe/ui/lib/motion";
+import { cn } from "@aloe/ui/lib/utils";
 
 /* The same grouped-list vocabulary the web app's settings console uses — a mono
    label, one rounded sheet, hairline-separated rows — with room for an action

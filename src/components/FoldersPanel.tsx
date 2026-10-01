@@ -2,9 +2,9 @@ import React from "react";
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import { Folder, FolderPlus, MessageSquare, Trash2 } from "lucide-react";
 
-import Button from "@/components/ui/Button";
-import { EASE_OUT } from "@/lib/motion";
-import { relativeTime } from "@/lib/utils";
+import Button from "@aloe/ui/components/ui/Button";
+import { EASE_OUT } from "@aloe/ui/lib/motion";
+import { relativeTime } from "@aloe/ui/lib/utils";
 import type { ConversationFolder, GrantedFolder } from "../types";
 import { ControlGroup, EmptyRow } from "./ControlGroup";
 

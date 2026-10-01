@@ -2,12 +2,13 @@ import React from "react";
 import { motion, useReducedMotion } from "framer-motion";
 import { MonitorCheck, PlugZap } from "lucide-react";
 
-import PageHeader from "@/components/ui/PageHeader";
-import { PANE_IN_REDUCED, paneIn } from "@/lib/motion";
+import PageHeader from "@aloe/ui/components/ui/PageHeader";
+import { PANE_IN_REDUCED, paneIn } from "@aloe/ui/lib/motion";
 import type { AgentConfig, CommandTrustMode, PendingApproval } from "../types";
 import { ActivityList } from "./ActivityList";
 import { ApprovalsPanel } from "./ApprovalsPanel";
 import { ConnectionPanel } from "./ConnectionPanel";
+import { DesktopControlPanel } from "./DesktopControlPanel";
 import { FoldersPanel } from "./FoldersPanel";
 
 type Props = {
@@ -18,13 +19,14 @@ type Props = {
   onAddFolder: () => void;
   onRemoveFolder: (path: string) => void;
   onSetCommandTrustMode: (mode: CommandTrustMode) => void;
+  onSetDesktopControl: (enabled: boolean) => void;
 };
 
 /* One page, one title, four labelled groups — the same console shape as the web
    app's settings. It used to be four cards, each with its own display heading
    and its own eyebrow, which made a page of five competing titles. */
 
-export function DesktopControls({ config, pending, onRefresh, onReset, onAddFolder, onRemoveFolder, onSetCommandTrustMode }: Props) {
+export function DesktopControls({ config, pending, onRefresh, onReset, onAddFolder, onRemoveFolder, onSetCommandTrustMode, onSetDesktopControl }: Props) {
   const reduceMotion = useReducedMotion();
   const connected = config.socketStatus === "connected";
 
@@ -64,6 +66,7 @@ export function DesktopControls({ config, pending, onRefresh, onReset, onAddFold
           <ConnectionPanel config={config} onReset={onReset} />
           <FoldersPanel folders={config.folders} conversationFolders={config.conversationFolders} onAdd={onAddFolder} onRemove={onRemoveFolder} />
           <ApprovalsPanel config={config} pending={pending} onRefresh={onRefresh} onSetCommandTrustMode={onSetCommandTrustMode} />
+          <DesktopControlPanel enabled={config.desktopControlEnabled} onSetEnabled={onSetDesktopControl} />
           <ActivityList actions={config.recentActions} />
         </motion.div>
       </div>

@@ -2,6 +2,8 @@ node_modules
 dist
 .tauri
 src-tauri/target
+# Extra Cargo target dirs, e.g. `cargo check --target-dir target-check`
+src-tauri/target-*/
 src-tauri/gen
 *.log
 .env

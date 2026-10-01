@@ -45,6 +45,22 @@ pub const BROWSER_CDP_TIMEOUT_SECONDS: u64 = 30;
 pub const BROWSER_NAVIGATION_TIMEOUT_SECONDS: u64 = 30;
 pub const MAX_PAGE_TEXT_CHARS: usize = 12_000;
 
+// ── Desktop control ──────────────────────────────────────────────────────────
+/// Longest edge of a desktop screenshot. Control actions take coordinates in this same space, so
+/// it is also the precision ceiling for clicks: 1280 keeps a 4K display at ~3px per unit.
+pub const SCREENSHOT_MAX_DIMENSION: u32 = 1280;
+pub const SCREENSHOT_JPEG_QUALITY: u8 = 75;
+/// Pause between an action and the screenshot returned with it, so the UI has reacted.
+pub const DESKTOP_CONTROL_SETTLE_MS: u64 = 450;
+/// How long the on-screen overlay (overlay.rs) stays up after the last control action. Longer than
+/// the model's usual think time between steps, so it doesn't blink off mid-task.
+/// Only a fallback: computer_use ends a run explicitly (`desktop_release`). Live runs showed up to
+/// ~20s of model thinking between steps late in a long run, so anything shorter blinks mid-task.
+pub const DESKTOP_CONTROL_OVERLAY_IDLE_SECONDS: u64 = 30;
+/// Pointer within this many pixels of a display corner trips the failsafe.
+pub const DESKTOP_CONTROL_FAILSAFE_PX: i32 = 3;
+pub const MAX_DESKTOP_TYPE_CHARS: usize = 4_000;
+
 // ── Persisted history ────────────────────────────────────────────────────────
 /// Recent actions and terminal sessions retained in config.json.
 pub const MAX_PERSISTED_HISTORY: usize = 50;

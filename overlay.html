@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Aloe is using your computer</title>
+    <style>
+      /* Two windows load this page (see overlay.rs): a click-through glow that covers the whole
+         display, and a small clickable pill. Each shows only its own part. Both are excluded from
+         Aloe's own screenshots, so none of this ever reaches the model. */
+      :root {
+        --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
+        --ease-in-out: cubic-bezier(0.77, 0, 0.175, 1);
+        --glow: 123 189 150; /* --moss, dark theme */
+        --moss-deep: 47 107 79; /* --moss, light theme */
+        --cream: #f4f7f0;
+        color-scheme: dark;
+      }
+      html, body { margin: 0; height: 100%; background: transparent; overflow: hidden; }
+      body { font: 500 13px/1 "Instrument Sans Variable", system-ui, -apple-system, "Segoe UI", sans-serif; }
+
+      /* Show and hide are transitions, not keyframes: a run that resumes mid-fade retargets from
+         where it is instead of restarting. */
+      .glow, .pill {
+        opacity: 0;
+        transition: opacity 250ms var(--ease-out), transform 250ms var(--ease-out);
+      }
+      [data-active="true"] .glow, [data-active="true"] .pill { opacity: 1; }
+      html[data-part="glow"] .pill, html[data-part="pill"] .glow { display: none; }
+
+      /* The edge glow is painted once; only opacity moves, so the breathing never repaints a
+         full-screen shadow. */
+      .glow { position: fixed; inset: 0; pointer-events: none; }
+      .glow::before, .glow::after { content: ""; position: absolute; inset: 0; }
+      /* A light ring over a dark moss hairline: one of the two always contrasts, whatever the
+         wallpaper or app underneath is. */
+      .glow::before {
+        box-shadow:
+          inset 0 0 0 3px rgb(var(--glow)),
+          inset 0 0 0 4px rgb(var(--moss-deep) / 0.6),
+          inset 0 0 40px 8px rgb(var(--glow) / 0.45);
+      }
+      .glow::after {
+        box-shadow: inset 0 0 90px 20px rgb(var(--glow) / 0.5);
+        opacity: 0;
+        animation: breathe 1.6s var(--ease-in-out) infinite alternate;
+      }
+      @keyframes breathe { to { opacity: 1; } }
+
+      /* Enters from just above and leaves the same way. */
+      .pill {
+        position: fixed; inset: 0;
+        display: flex; align-items: center; gap: 10px;
+        padding: 0 6px 0 14px;
+        border-radius: 999px;
+        background: rgb(15 21 18 / 0.9);
+        box-shadow: inset 0 0 0 1px rgb(var(--glow) / 0.45);
+        color: var(--cream);
+        transform: translateY(-6px);
+        user-select: none;
+        -webkit-user-select: none;
+      }
+      [data-active="true"] .pill { transform: translateY(0); }
+      .dot {
+        width: 8px; height: 8px; flex: none; border-radius: 999px;
+        background: rgb(var(--glow));
+        animation: breathe-dot 1.6s var(--ease-in-out) infinite alternate;
+      }
+      @keyframes breathe-dot { from { opacity: 0.45; } to { opacity: 1; } }
+      .label { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+      .stop {
+        flex: none; height: 28px; padding: 0 12px;
+        border: 0; border-radius: 999px;
+        background: rgb(244 247 240 / 0.12); color: var(--cream);
+        font: inherit; cursor: pointer;
+        transition: background-color 150ms ease, transform 120ms var(--ease-out);
+      }
+      .stop:active { transform: scale(0.97); }
+      .stop:focus-visible { outline: 2px solid rgb(var(--glow)); outline-offset: 2px; }
+      @media (hover: hover) and (pointer: fine) {
+        .stop:hover { background: rgb(244 247 240 / 0.2); }
+      }
+
+      /* Gentler, not absent: the fades stay, the travel and the breathing go. */
+      @media (prefers-reduced-motion: reduce) {
+        .pill, [data-active="true"] .pill { transform: none; }
+        .glow::after, .dot { animation: none; }
+        .glow::after { opacity: 0.5; }
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root" data-active="false">
+      <div class="glow" aria-hidden="true"></div>
+      <div class="pill" role="status">
+        <span class="dot" aria-hidden="true"></span>
+        <span class="label">Aloe is using your computer</span>
+        <button type="button" class="stop" id="stop">Stop</button>
+      </div>
+    </div>
+    <script type="module" src="/src/overlay.ts"></script>
+  </body>
+</html>

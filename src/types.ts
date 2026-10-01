@@ -37,6 +37,7 @@ export type AgentConfig = {
   socketError: string | null;
   alwaysAllowCommands: boolean;
   commandTrustMode: CommandTrustMode;
+  desktopControlEnabled: boolean;
   runOnStartup: boolean;
   startMinimized: boolean;
   folders: GrantedFolder[];
@@ -75,6 +76,7 @@ export const DEFAULT_CONFIG: AgentConfig = {
   socketError: null,
   alwaysAllowCommands: false,
   commandTrustMode: "ask",
+  desktopControlEnabled: false,
   runOnStartup: false,
   startMinimized: false,
   folders: [],

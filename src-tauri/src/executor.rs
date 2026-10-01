@@ -6,6 +6,7 @@ use tokio::process::Command;
 use tokio_tungstenite::tungstenite::Message;
 
 use crate::browser::dispatch_browser;
+use crate::computer::{capture_desktop_screenshot, dispatch_desktop_control};
 use crate::config::{add_recent, debug_log, rescan_folder_contexts, save_config, scoped_config, AppState, COMMAND_TIMEOUT_SECONDS};
 use crate::fs::{
     apply_patch, assert_granted, attach_file, create_file, create_folder, delete_file,
@@ -401,12 +402,16 @@ pub async fn dispatch_tool(
         "list_terminal_sessions" => list_terminal_sessions(state).await,
         "wait_terminal_session"  => wait_terminal_session(state, job.input.clone()).await,
         "open_local_url"         => open_local_url(&job.input).await,
-        "capture_desktop_screenshot" => capture_desktop_screenshot().await,
+        "capture_desktop_screenshot" => capture_desktop_screenshot(app).await,
         "get_editor_context"     => get_editor_context(config, &job.input).await,
         "show_notification"      => show_notification(app, &job.input).await,
-        // Browser automation is entirely self-contained (its own Chrome process and CDP
-        // connection) and touches no granted folder, so it needs neither config nor AppState.
+        // Deprecated (see browser.rs): kept for backends that still dispatch browser_ jobs.
+        // Self-contained (its own Chrome process and CDP connection), so it needs neither config
+        // nor AppState.
         kind if kind.starts_with("browser_") => dispatch_browser(kind, &job.input).await,
+        // Mouse and keyboard control. Gated on the device's own desktop-control switch inside
+        // dispatch_desktop_control, not on folder grants: it touches the screen, not the disk.
+        kind if kind.starts_with("desktop_") => dispatch_desktop_control(app, kind, &job.input).await,
         _                        => Err(format!("Unknown job type: {}", job.kind)),
     }
 }
@@ -434,84 +439,6 @@ async fn open_local_url(input: &Value) -> Result<Value, String> {
     .map_err(|e| e.to_string())?;
 
     Ok(json!({ "url": url, "opened": status.success(), "exitCode": status.code() }))
-}
-
-async fn capture_desktop_screenshot() -> Result<Value, String> {
-    if !cfg!(target_os = "windows") {
-        return Err("Desktop screenshot capture is currently implemented for Windows only.".to_string());
-    }
-
-    let script = r#"
-Add-Type -AssemblyName System.Windows.Forms;
-Add-Type -AssemblyName System.Drawing;
-$bounds = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds;
-$bitmap = New-Object System.Drawing.Bitmap $bounds.Width, $bounds.Height;
-$graphics = [System.Drawing.Graphics]::FromImage($bitmap);
-$graphics.CopyFromScreen($bounds.Location, [System.Drawing.Point]::Empty, $bounds.Size);
-$maxDimension = 960;
-$largest = [Math]::Max($bounds.Width, $bounds.Height);
-$scale = if ($largest -gt $maxDimension) { $maxDimension / $largest } else { 1.0 };
-$targetWidth = [Math]::Max(1, [int][Math]::Round($bounds.Width * $scale));
-$targetHeight = [Math]::Max(1, [int][Math]::Round($bounds.Height * $scale));
-$finalBitmap = if ($scale -lt 1.0) {
-    $resized = New-Object System.Drawing.Bitmap $targetWidth, $targetHeight;
-    $resizeGraphics = [System.Drawing.Graphics]::FromImage($resized);
-    $resizeGraphics.InterpolationMode = [System.Drawing.Drawing2D.InterpolationMode]::HighQualityBicubic;
-    $resizeGraphics.DrawImage($bitmap, 0, 0, $targetWidth, $targetHeight);
-    $resizeGraphics.Dispose();
-    $resized;
-} else {
-    $bitmap;
-};
-$path = Join-Path $env:TEMP ("aloe-screenshot-" + [guid]::NewGuid().ToString() + ".png");
-$finalBitmap.Save($path, [System.Drawing.Imaging.ImageFormat]::Png);
-$graphics.Dispose();
-if ($finalBitmap -ne $bitmap) { $finalBitmap.Dispose(); }
-$bitmap.Dispose();
-$bytes = [System.IO.File]::ReadAllBytes($path);
-[System.IO.File]::Delete($path);
-@{
-    mimeType = "image/png";
-    base64 = [Convert]::ToBase64String($bytes);
-    width = $targetWidth;
-    height = $targetHeight;
-    originalWidth = $bounds.Width;
-    originalHeight = $bounds.Height;
-    downscaled = ($scale -lt 1.0);
-    maxDimension = $maxDimension;
-} | ConvertTo-Json -Compress;
-"#;
-
-    let output = tokio::time::timeout(
-        Duration::from_secs(20),
-        {
-            let mut cmd = Command::new("powershell");
-            cmd.arg("-NoProfile")
-                .arg("-Command")
-                .arg(script)
-                .stdout(Stdio::piped())
-                .stderr(Stdio::piped());
-            hide_command_window(&mut cmd);
-            cmd.output()
-        },
-    )
-    .await
-    .map_err(|_| "Screenshot capture timed out.".to_string())?
-    .map_err(|e| e.to_string())?;
-
-    if !output.status.success() {
-        return Err(String::from_utf8_lossy(&output.stderr).trim().to_string());
-    }
-
-    let payload = String::from_utf8_lossy(&output.stdout).trim().to_string();
-    let mut value: Value = serde_json::from_str(&payload).map_err(|e| e.to_string())?;
-    if let Some(object) = value.as_object_mut() {
-        object.insert(
-            "note".to_string(),
-            Value::String("Primary display screenshot captured by Aloe Desktop.".to_string()),
-        );
-    }
-    Ok(value)
 }
 
 async fn get_editor_context(config: &AgentConfig, input: &Value) -> Result<Value, String> {

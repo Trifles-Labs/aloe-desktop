@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useRef, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { CheckCircle2, Info, X, XCircle } from "lucide-react";
 
-import { EASE_OUT } from "@/lib/motion";
+import { EASE_OUT } from "@aloe/ui/lib/motion";
 import type { Toast, ToastVariant } from "./types";
 
 const LIFETIME = 4200;

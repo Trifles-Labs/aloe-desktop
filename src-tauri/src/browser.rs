@@ -1,5 +1,10 @@
 //! Browser automation over the Chrome DevTools Protocol.
 //!
+//! **Deprecated.** The backend no longer offers these tools to the model; desktop control
+//! (computer.rs) does the same work in the user's normal browser. This stays only so a `browser_*`
+//! job from a backend that hasn't upgraded yet still completes. Delete it, and the `browser_` arm
+//! in executor.rs, once no deployed backend can dispatch one.
+//!
 //! Design notes worth knowing before changing anything here:
 //!
 //! * **All DOM logic lives in JavaScript, not Rust.** Rust owns process launch, the websocket

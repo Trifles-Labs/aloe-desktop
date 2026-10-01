@@ -3,7 +3,7 @@ import Link from "next/link";
 import { motion, useReducedMotion } from "framer-motion";
 import { ArrowUpRight, CheckCircle2, RefreshCw, ShieldAlert, ShieldCheck } from "lucide-react";
 
-import { SPRING_MOVE } from "@/lib/motion";
+import { SPRING_MOVE } from "@aloe/ui/lib/motion";
 import type { AgentConfig, CommandTrustMode, PendingApproval } from "../types";
 import { ControlGroup } from "./ControlGroup";
 

@@ -2,7 +2,7 @@ import React, { useState } from "react";
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import { PartyPopper, X } from "lucide-react";
 
-import { EASE_OUT } from "@/lib/motion";
+import { EASE_OUT } from "@aloe/ui/lib/motion";
 
 /* A new build is already downloaded by the time this appears, so the honest
    framing is "next launch, or now" — not a demand. It opens by growing into

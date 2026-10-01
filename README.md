@@ -1,12 +1,13 @@
 # Aloe Desktop
 
-Aloe Desktop is the native desktop agent for Aloe. It connects a local machine to the Aloe web app so Aloe can safely work with granted folders, run local commands, manage terminal sessions, open local URLs, show notifications, and report recent activity back to the user.
+Aloe Desktop is the native desktop agent for Aloe. It is Aloe with access to your computer: the same chat as the web app, plus the ability to safely work with granted folders, run local commands, manage terminal sessions, open local URLs, show notifications, and report recent activity back to the user.
 
 The app is built with Tauri 2, Rust, React 19, Vite, and Bun.
 
 ## Features
 
-- Register this device with a setup token from Aloe Integrations.
+- Sign in with Google (through the browser); the device pairs itself to your account.
+- Only chats sent from this app can use the computer. Chats on the Aloe web app never get local tools; the app proves where a chat came from by sending its device credential in `X-Aloe-Agent`.
 - Maintain a websocket connection to the Aloe backend.
 - Grant and revoke local folder access, permanently for the device or temporarily for a single chat.
 - Search, read, create, update, delete, and patch files inside granted folders.
@@ -33,7 +34,7 @@ The app is built with Tauri 2, Rust, React 19, Vite, and Bun.
 - Bun
 - Rust stable and Cargo
 - Tauri 2 system dependencies for your OS
-- A valid Aloe setup token to connect the app
+- An Aloe account (Google sign-in)
 
 For Linux, install the native packages required by Tauri/WebKitGTK for your distribution before running or building the app.
 
@@ -68,8 +69,8 @@ bun run tauri:build
 ## Connecting to Aloe
 
 1. Open Aloe Desktop.
-2. Copy a setup token from the Aloe Integrations page.
-3. Paste the token into the login screen.
+2. Click **Continue with Google**. Your browser finishes sign-in and hands the session back over the `aloe://` deep link.
+3. The device registers itself and connects.
 4. Grant folders that Aloe is allowed to inspect or modify.
 5. Review command approvals from the Desktop controls page when commands are requested.
 
@@ -102,7 +103,7 @@ File operations are still limited to folders the user has explicitly granted.
 Two kinds of grant, with the same enforcement:
 
 - **Device folders**, added in this app, reachable by every conversation and every background task for as long as they are listed.
-- **Chat folders**, shared from the Aloe web app's chat composer. Pressing the folder button there asks this device to open its native folder dialog; the folder the user picks becomes reachable from that one conversation and nowhere else, until they remove it in the same place. They are listed read-only under **Folder access** so it is always visible on the device what a chat can reach.
+- **Chat folders**, shared from the chat composer in this app. Pressing the folder button there asks this device to open its native folder dialog; the folder the user picks becomes reachable from that one conversation and nowhere else, until they remove it in the same place. They are listed read-only under **Folder access** so it is always visible on the device what a chat can reach.
 
 The browser never names a path — it can only ask for the dialog, and is told the result. Aloe Desktop keeps its own copy of the chat grants and re-checks every job against them, so a job naming a conversation it was not granted still fails here.
 
@@ -145,9 +146,9 @@ python build_release.py 1.2.3 --linux-bundles deb,rpm
 
 ## Troubleshooting
 
-If registration fails, verify the setup token, backend URL, and that the backend is reachable from the desktop machine.
+If sign-in fails, verify the backend URL, the web app URL (`ALOE_FRONTEND_URL`), and that the backend is reachable from the desktop machine.
 
-If the socket stays disconnected, log out and register again with a fresh setup token. The app also reconnects automatically with backoff when the backend is temporarily unavailable.
+If the socket stays disconnected, log out and sign in again. The app also reconnects automatically with backoff when the backend is temporarily unavailable.
 
 If folder operations fail, remove and re-add the folder so the stored path is refreshed and canonicalized.
 

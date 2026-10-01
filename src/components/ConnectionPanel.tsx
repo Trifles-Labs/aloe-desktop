@@ -1,8 +1,8 @@
 import React, { useState } from "react";
 import { Check, Copy, Laptop, LogOut, Radio, UserRound } from "lucide-react";
 
-import Button from "@/components/ui/Button";
-import Modal from "@/components/ui/Modal";
+import Button from "@aloe/ui/components/ui/Button";
+import Modal from "@aloe/ui/components/ui/Modal";
 import type { AgentConfig } from "../types";
 import { copyText } from "../lib/desktop";
 import { ControlGroup, ControlRow } from "./ControlGroup";
@@ -67,7 +67,7 @@ export function ConnectionPanel({ config, onReset }: Props) {
           Log this device out?
         </h2>
         <p className="mt-2 text-[13px] leading-6 text-ink-soft">
-          Aloe stops reaching this computer — no folder access, no commands, no local search. Pairing it again needs a new setup token.
+          Aloe stops reaching this computer — no folder access, no commands, no local search. Signing in again pairs it again.
         </p>
         <div className="mt-5 flex justify-end gap-2">
           <Button variant="ghost" size="sm" onClick={() => setConfirming(false)}>

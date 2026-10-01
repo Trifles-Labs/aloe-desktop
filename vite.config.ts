@@ -5,7 +5,6 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
-const webRoot = path.resolve(here, "../aloe-frontend");
 
 export default defineConfig(({ command, mode }) => {
   const env = loadEnv(mode, here, "");
@@ -15,13 +14,11 @@ export default defineConfig(({ command, mode }) => {
   return {
     plugins: [react(), tailwindcss()],
     resolve: {
-      /* One motion runtime for the whole window. The web app's components
-         resolve framer-motion from their own node_modules, so without this the
-         bundle carries two copies — two MotionConfig contexts, and layout
-         animations that can't see each other across the seam. */
+      /* One motion runtime for the whole window: if @aloe/ui ever ends up with
+         its own framer-motion, the bundle would carry two MotionConfig contexts
+         and layout animations that can't see each other across the seam. */
       dedupe: ["react", "react-dom", "framer-motion", "motion-dom", "motion-utils"],
       alias: {
-        "@": webRoot,
         "react": path.resolve(here, "node_modules/react"),
         "react-dom": path.resolve(here, "node_modules/react-dom"),
         "next/link": path.resolve(here, "src/shims/next-link.tsx"),
@@ -31,6 +28,8 @@ export default defineConfig(({ command, mode }) => {
     },
     optimizeDeps: {
       include: ["react", "react-dom", "react/jsx-runtime", "react-dom/client"],
+      // Shipped as TypeScript source; served as source so the next/* aliases above apply to it.
+      exclude: ["@aloe/ui"],
     },
     define: {
       "process.env.NEXT_PUBLIC_API_URL": JSON.stringify(backendUrl),
@@ -39,7 +38,8 @@ export default defineConfig(({ command, mode }) => {
     server: {
       strictPort: true,
       port: 1420,
-      fs: { allow: [here, webRoot] },
+      // ../aloe-ui is where `bun link @aloe/ui` points while developing the shared UI.
+      fs: { allow: [here, path.resolve(here, "../aloe-ui")] },
       watch: {
         ignored: [path.resolve(here, "src-tauri/**")],
       },
@@ -48,6 +48,7 @@ export default defineConfig(({ command, mode }) => {
       rollupOptions: {
         input: {
           main: path.resolve(here, "index.html"),
+          overlay: path.resolve(here, "overlay.html"),
         },
       },
     },

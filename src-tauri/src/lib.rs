@@ -1,10 +1,12 @@
 mod browser;
+mod computer;
 mod config;
 mod desktop;
 mod executor;
 mod fs;
 mod models;
 mod notifications;
+mod overlay;
 mod search;
 mod shell;
 mod socket;
@@ -284,6 +286,34 @@ fn set_command_trust_mode(state: State<AppState>, mode: String) -> Result<AgentC
     Ok(result)
 }
 
+/// Only this app's own UI can turn desktop control on. Nothing on the socket can: the backend
+/// never sends this setting down, and the agent refuses to click inside this window (computer.rs).
+#[tauri::command]
+fn set_desktop_control_enabled(app: AppHandle, state: State<AppState>, enabled: bool) -> Result<AgentConfig, String> {
+    let next = {
+        let mut config = state.config.lock().expect("config mutex");
+        config.desktop_control_enabled = enabled;
+        save_config(&config)?;
+        config.clone()
+    };
+    if !enabled {
+        overlay::close(&app);
+    }
+    Ok(next)
+}
+
+/// The overlay's Stop button.
+#[tauri::command]
+fn stop_desktop_control(app: AppHandle) {
+    computer::disable_desktop_control(&app);
+}
+
+/// Lets a freshly created overlay window catch up on an event it was created too late to hear.
+#[tauri::command]
+fn desktop_control_overlay_active() -> bool {
+    overlay::is_active()
+}
+
 // ── Folder management ─────────────────────────────────────────────────────────
 
 #[tauri::command]
@@ -428,6 +458,9 @@ pub fn run() {
             reset_agent_connection,
             register_agent,
             set_command_trust_mode,
+            set_desktop_control_enabled,
+            stop_desktop_control,
+            desktop_control_overlay_active,
             sync_folders,
             add_folder,
             remove_folder,

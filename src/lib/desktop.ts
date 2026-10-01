@@ -1,10 +1,10 @@
 import { invoke } from "@tauri-apps/api/core";
-import { API_URL } from "@/lib/config";
+import { API_URL } from "@aloe/ui/lib/config";
 
-/** The web app this device is paired with — where setup tokens are issued. */
+/** The Aloe web app — where browser-only flows (OAuth consent) finish. */
 export const APP_URL = process.env.NEXT_PUBLIC_APP_URL ?? "https://aloe.247autoarmy.in";
 
-/** The Connections pane: the one screen that hands out a desktop setup token. */
+/** The web Connections pane, for account OAuth that has to run in a real browser. */
 export const CONNECTIONS_URL = `${APP_URL}/app/settings?section=connections`;
 
 /** Deep link the browser hands the Google OAuth token back through (see the web app's
@@ -54,15 +54,6 @@ export async function copyText(value: string): Promise<boolean> {
     return true;
   } catch {
     return false;
-  }
-}
-
-/** Read the clipboard for the paste shortcut on the setup screen. */
-export async function readClipboard(): Promise<string | null> {
-  try {
-    return await navigator.clipboard.readText();
-  } catch {
-    return null;
   }
 }
 

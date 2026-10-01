@@ -2,9 +2,9 @@ import React, { useState } from "react";
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import { Check, ChevronDown, Copy } from "lucide-react";
 
-import Pill from "@/components/ui/Pill";
-import { EASE_OUT } from "@/lib/motion";
-import { relativeTime } from "@/lib/utils";
+import Pill from "@aloe/ui/components/ui/Pill";
+import { EASE_OUT } from "@aloe/ui/lib/motion";
+import { relativeTime } from "@aloe/ui/lib/utils";
 import type { RecentAction } from "../types";
 import { formatTimestamp } from "../types";
 import { copyText, humanizeKind } from "../lib/desktop";

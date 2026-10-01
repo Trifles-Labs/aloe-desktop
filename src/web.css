@@ -8,12 +8,10 @@
 @import "@fontsource-variable/bricolage-grotesque";
 @import "@fontsource-variable/geist-mono";
 
-@import "../../aloe-frontend/app/globals.css";
+@import "@aloe/ui/styles/globals.css";
 
-@source "../../aloe-frontend/app";
-@source "../../aloe-frontend/components";
-@source "../../aloe-frontend/contexts";
-@source "../../aloe-frontend/lib";
+/* Tailwind skips node_modules when it looks for class names. */
+@source "../node_modules/@aloe/ui";
 @source "./";
 
 :root {

@@ -17,11 +17,10 @@
     "jsx": "react-jsx",
     "baseUrl": ".",
     "paths": {
-      "@/*": ["../aloe-frontend/*"],
-      "framer-motion": ["node_modules/framer-motion"],
       "next/link": ["src/shims/next-link.tsx"],
-      "next/navigation": ["src/shims/next-navigation.ts"]
+      "next/navigation": ["src/shims/next-navigation.ts"],
+      "next/image": ["src/shims/next-image.tsx"]
     }
   },
-  "include": ["src", "../aloe-frontend/app/(app)", "../aloe-frontend/components", "../aloe-frontend/contexts", "../aloe-frontend/lib"]
+  "include": ["src"]
 }
