@@ -4,7 +4,7 @@
 
 The desktop app checks `https://github.com/Trifles-Labs/aloe-desktop/releases/latest/download/latest.json` on launch (see `plugins.updater.endpoints` in `src-tauri/tauri.conf.json`). That URL always resolves to the `latest.json` asset on the most recent **published, non-draft, non-prerelease** GitHub release.
 
-`.github/workflows/release.yml` builds and signs installers for macOS, Windows, and Linux via `tauri-apps/tauri-action`, which also generates `latest.json` and uploads it as a release asset. Releases are created as **drafts** (`releaseDraft: true`), so nothing ships to users until you manually publish the draft on GitHub — that's your rollout gate.
+`.github/workflows/release.yml` builds and signs installers for macOS, Windows, and Linux via `tauri-apps/tauri-action`, which also generates `latest.json` and uploads it as a release asset. Releases are published immediately (`releaseDraft: false`): pushing a tag ships to every running app on its next update check. There is no draft gate — test before you tag, or set `releaseDraft: true` in the workflow to get one back.
 
 If the update is available, the app downloads and installs it silently, then shows a "Restart now" banner.
 
@@ -42,13 +42,13 @@ git tag v1.2.0
 git push origin v1.2.0
 ```
 
-Pushing a `v*` tag triggers `.github/workflows/release.yml`, which builds installers for all platforms, signs them, and creates a **draft** GitHub release named `Aloe Desktop v1.2.0` with all installer artifacts and `latest.json` attached.
+Pushing a `v*` tag triggers `.github/workflows/release.yml`, which builds installers for all platforms, signs them, and publishes a GitHub release named `Aloe Desktop v1.2.0` with all installer artifacts and `latest.json` attached.
 
 You can also trigger the workflow manually via `workflow_dispatch` from the Actions tab.
 
-### 3. Publish the draft
+### 3. It's live
 
-Once the workflow finishes, open the draft release on GitHub, review the artifacts/notes, and click **Publish release**. As soon as it's published, `https://github.com/Trifles-Labs/aloe-desktop/releases/latest/download/latest.json` starts pointing at it, and running apps will pick it up on their next update check.
+As soon as the release is published, `https://github.com/Trifles-Labs/aloe-desktop/releases/latest/download/latest.json` points at it, and running apps pick it up on their next update check. Bump the version in `package.json` and `src-tauri/Cargo.toml` too, so all three stay in step with the tag.
 
 ---
 
