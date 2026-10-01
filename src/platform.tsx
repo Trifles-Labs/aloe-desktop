@@ -13,6 +13,7 @@ import type { Platform } from "@aloe/ui/lib/platform";
 import type { User } from "@aloe/ui/lib/types";
 import ConversationFolders from "./components/ConversationFolders";
 import DesktopConnectModal from "./components/DesktopConnectModal";
+import { isCodeSession } from "./code/sessions";
 import DesktopAppPane from "./settings/DesktopAppPane";
 import type { AgentConfig } from "./types";
 
@@ -57,6 +58,8 @@ export function useDesktopPlatform(config: AgentConfig, pendingCount: number, on
       readStoredUser,
       onSignOut: signOut,
       interceptOAuthConnect,
+      // Aloe Code sessions are listed in Code mode, by project.
+      hideConversation: isCodeSession,
     }),
     [pendingCount, readStoredUser, signOut, interceptOAuthConnect],
   );

@@ -109,6 +109,16 @@ The browser never names a path — it can only ask for the dialog, and is told t
 
 Sensitive-path write rules (`.git/`, `node_modules/`, build output, `.env`, keys) apply identically to both kinds.
 
+## Aloe Code
+
+The **Chat | Code** switch in the title bar opens Aloe Code: Aloe as a coding agent working in a project folder on this computer, like Claude Code in the Claude desktop app.
+
+- A **project** is a granted device folder (`Add project folder` uses the same grant as Folder access and shows up there). Sessions are listed in Code mode's own sidebar, grouped by project, and kept out of the chat sidebar.
+- A **session** is an ordinary conversation. Every message carries the project path and git branch to the model as hidden context (an `<aloe-context>` envelope that the thread doesn't display), so the agent knows where to read, edit, and run commands. Tools, approvals and trust modes are the same as in chat.
+- Every local tool is preloaded in a session. Code mode marks its requests with `workspace: "code"`, and the backend then loads the full local toolset (files, search, terminal, desktop, computer use) up front each turn, the same way it does for a chat with a shared folder. In regular chat the model has to discover those tools with `search_tools` first.
+- Where it's stored: messages live on the Aloe backend like any chat. The backend also marks the conversation as a Code session (`workspace: "code"`), which keeps it out of the chat list everywhere, including the web app. The project folder path for each session stays on this device, in `localStorage`. A session marked on the server that this device has no project for (from another computer, or after a reinstall) is listed under "No project on this computer", and you choose its project before continuing.
+- The branch is read from `.git/HEAD` rather than by running `git`, so opening a project never runs code from its repository config.
+
 ## Browser Automation
 
 Aloe drives Chrome (or Chromium/Edge) through the DevTools Protocol on `127.0.0.1:9333`. If something is already listening there, Aloe attaches to it; otherwise it launches the browser itself.
