@@ -9,7 +9,6 @@ import { useToasts, ToastContainer } from "./toast";
 import { useAutoUpdate } from "./hooks/useAutoUpdate";
 import { ButterflyDecor } from "./components/ButterflyDecor";
 import { AuthScreen } from "./components/AuthScreen";
-import { DesktopControls } from "./components/DesktopControls";
 import { DesktopTitleBar } from "./components/DesktopTitleBar";
 import { UpdateBanner } from "./components/UpdateBanner";
 import { ThemeProvider } from "next-themes";
@@ -32,6 +31,7 @@ import { DEFAULT_CONFIG } from "./types";
 import type { AgentConfig, CommandTrustMode, PendingApproval } from "./types";
 import { errorMessage, GOOGLE_AUTH_EVENT, mintAgentSetupToken, startGoogleAuth } from "./lib/desktop";
 import { useDesktopPlatform } from "./platform";
+import { DesktopControlsProvider } from "./settings/DesktopControlsContext";
 import CodeWorkspace from "./code/CodeWorkspace";
 import "./web.css";
 
@@ -43,9 +43,11 @@ const ROUTE_ALIASES: Record<string, string> = {
   "/app/integrations": "/app/settings?section=connections",
   "/app/mcp": "/app/settings?section=connections",
   "/app/mobile-login": "/app/settings?section=devices",
+  // Desktop controls used to be its own page; it is now the Desktop app settings pane.
+  "/app/desktop": "/app/settings?section=desktop",
 };
 
-function DesktopRouter({ desktopPage, codePage }: { desktopPage: React.ReactNode; codePage: React.ReactNode }) {
+function DesktopRouter({ codePage }: { codePage: React.ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
 
@@ -70,7 +72,6 @@ function DesktopRouter({ desktopPage, codePage }: { desktopPage: React.ReactNode
     /* First run sends people here before anything else is usable; without the
        route the wizard was skipped and you landed in an empty chat. */
     "/app/onboarding": <OnboardingPage />,
-    "/app/desktop": desktopPage,
   };
 
   /* Aloe Code draws its own session sidebar, so it sits outside AppLayout. */
@@ -176,7 +177,7 @@ function App() {
     });
   }, [toast]);
 
-  const { platform, overlay } = useDesktopPlatform(config, pending.length, signOut);
+  const { platform, overlay } = useDesktopPlatform(config, signOut);
 
   // ── Handlers ────────────────────────────────────────────────────────────────
 
@@ -317,6 +318,19 @@ function App() {
     }
   };
 
+  /* Read by the Desktop app pane on the shared Settings page. */
+  const desktopControls = {
+    config,
+    pending,
+    setConfig,
+    onRefresh: () => void refresh(),
+    onReset: () => void resetConnection(),
+    onAddFolder: () => void addFolder(),
+    onRemoveFolder: (path: string) => void removeFolder(path),
+    onSetCommandTrustMode: (mode: CommandTrustMode) => void setCommandTrustMode(mode),
+    onSetDesktopControl: (enabled: boolean) => void setDesktopControl(enabled),
+  };
+
   // ── Render ──────────────────────────────────────────────────────────────────
 
   const toastLayer = <ToastContainer toasts={toasts} onDismiss={dismiss} onPause={pause} onResume={resume} />;
@@ -328,24 +342,12 @@ function App() {
         {updateReady && <UpdateBanner onRestart={() => void restart()} />}
         <div className="relative min-h-0 flex-1 contain-[layout]">
           <PlatformProvider value={platform}>
-            <Providers>
-              <DesktopRouter
-                codePage={<CodeWorkspace config={config} pendingCount={pending.length} onAddProject={addProject} />}
-                desktopPage={
-                  <DesktopControls
-                    config={config}
-                    pending={pending}
-                    onRefresh={() => void refresh()}
-                    onReset={() => void resetConnection()}
-                    onAddFolder={() => void addFolder()}
-                    onRemoveFolder={(path) => void removeFolder(path)}
-                    onSetCommandTrustMode={(mode) => void setCommandTrustMode(mode)}
-                    onSetDesktopControl={(enabled) => void setDesktopControl(enabled)}
-                  />
-                }
-              />
-              {overlay}
-            </Providers>
+            <DesktopControlsProvider value={desktopControls}>
+              <Providers>
+                <DesktopRouter codePage={<CodeWorkspace config={config} pendingCount={pending.length} onAddProject={addProject} />} />
+                {overlay}
+              </Providers>
+            </DesktopControlsProvider>
           </PlatformProvider>
           {toastLayer}
         </div>

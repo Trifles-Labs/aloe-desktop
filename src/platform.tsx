@@ -1,12 +1,12 @@
 /* Everything Aloe Desktop adds to the shared web app. The web pages know
    nothing about this machine; they expose slots (see the web app's
-   lib/platform.tsx) and this file fills them: the Desktop controls entry, the
-   Desktop app settings pane, per-chat folders in the composer, the OAuth
+   lib/platform.tsx) and this file fills them: the Desktop app settings pane
+   (startup, connection, folders, approvals, desktop control, activity), per-chat folders in the composer, the OAuth
    hand-off to the browser, and the device header that unlocks local tools for
    chats sent from here. */
 
 import { useCallback, useMemo, useRef, useState } from "react";
-import { Monitor, MonitorCog } from "lucide-react";
+import { Monitor } from "lucide-react";
 
 import { configureApiClient } from "@aloe/ui/lib/api";
 import type { Platform } from "@aloe/ui/lib/platform";
@@ -30,7 +30,7 @@ configureApiClient({
   },
 });
 
-export function useDesktopPlatform(config: AgentConfig, pendingCount: number, onSignOut: () => void) {
+export function useDesktopPlatform(config: AgentConfig, onSignOut: () => void) {
   agentCredential = config.credential;
 
   /* AuthProvider re-runs its bootstrap whenever these change identity, so they
@@ -52,7 +52,6 @@ export function useDesktopPlatform(config: AgentConfig, pendingCount: number, on
   const platform = useMemo<Platform>(
     () => ({
       hostHasBrand: true,
-      sidebarItems: [{ href: "/app/desktop", icon: MonitorCog, label: "Desktop controls", count: pendingCount, tone: "clay" }],
       settingsSections: [{ id: "desktop", label: "Desktop app", icon: Monitor, render: () => <DesktopAppPane /> }],
       ComposerAddon: ConversationFolders,
       readStoredUser,
@@ -61,7 +60,7 @@ export function useDesktopPlatform(config: AgentConfig, pendingCount: number, on
       // Aloe Code sessions are listed in Code mode, by project.
       hideConversation: isCodeSession,
     }),
-    [pendingCount, readStoredUser, signOut, interceptOAuthConnect],
+    [readStoredUser, signOut, interceptOAuthConnect],
   );
 
   const overlay = connectProvider ? <DesktopConnectModal providerName={connectProvider} onDismiss={() => setConnectProvider(null)} /> : null;

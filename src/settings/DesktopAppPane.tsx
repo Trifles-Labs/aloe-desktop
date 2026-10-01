@@ -1,37 +1,41 @@
-/* Startup preferences for Aloe Desktop. A settings pane the desktop adds to the
-   shared Settings page; the web app has no equivalent. */
+/* Everything Aloe Desktop controls on this computer, as one pane the desktop
+   adds to the shared Settings page; the web app has no equivalent. It used to
+   be split between this pane (startup preferences) and a separate Desktop
+   controls page — now it is one place: how the app starts, what the local
+   agent can reach, what it may run without asking, and what it has been doing. */
 
 import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { getVersion } from "@tauri-apps/api/app";
-import { Info, MonitorDown, Power } from "lucide-react";
+import { Info, MonitorCheck, MonitorDown, PlugZap, Power } from "lucide-react";
 
 import Switch from "@aloe/ui/components/ui/Switch";
 import { PaneHeader } from "@aloe/ui/components/settings/SettingsPane";
+import { ActivityList } from "../components/ActivityList";
+import { ApprovalsPanel } from "../components/ApprovalsPanel";
+import { ConnectionPanel } from "../components/ConnectionPanel";
+import { ControlGroup, ControlRow } from "../components/ControlGroup";
+import { DesktopControlPanel } from "../components/DesktopControlPanel";
+import { FoldersPanel } from "../components/FoldersPanel";
 import type { AgentConfig } from "../types";
-
-type DesktopPreferences = { runOnStartup: boolean; startMinimized: boolean };
-
-const preferencesOf = (config: AgentConfig): DesktopPreferences => ({ runOnStartup: config.runOnStartup, startMinimized: config.startMinimized });
+import { useDesktopControls } from "./DesktopControlsContext";
 
 export default function DesktopAppPane() {
-  const [preferences, setPreferences] = useState<DesktopPreferences | null>(null);
+  const { config, pending, setConfig, onRefresh, onReset, onAddFolder, onRemoveFolder, onSetCommandTrustMode, onSetDesktopControl } =
+    useDesktopControls();
   const [version, setVersion] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const connected = config.socketStatus === "connected";
 
   useEffect(() => {
-    invoke<AgentConfig>("get_config")
-      .then((config) => setPreferences(preferencesOf(config)))
-      .catch((cause: unknown) => setError(cause instanceof Error ? cause.message : "Could not load desktop preferences."));
     getVersion().then(setVersion).catch(() => setVersion(null));
   }, []);
 
   const update = async (kind: "startup" | "minimized", enabled: boolean) => {
     setBusy(true);
     try {
-      const config = await invoke<AgentConfig>(kind === "startup" ? "set_run_on_startup" : "set_start_minimized", { enabled });
-      setPreferences(preferencesOf(config));
+      setConfig(await invoke<AgentConfig>(kind === "startup" ? "set_run_on_startup" : "set_start_minimized", { enabled }));
       setError(null);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Could not update desktop preferences.");
@@ -42,43 +46,60 @@ export default function DesktopAppPane() {
 
   return (
     <>
-      <PaneHeader title="Desktop app" blurb="How Aloe Desktop behaves when you sign in to your computer." />
+      <PaneHeader
+        title="Desktop app"
+        blurb={`The local agent on ${config.deviceName}: how it starts, what it can reach, what it may run without asking, and what it has been doing.`}
+        actions={
+          <span
+            className={`inline-flex items-center gap-2 rounded-full px-3 py-1.5 text-xs font-semibold ${
+              connected ? "bg-sage text-ink" : "border border-edge bg-surface text-ink-soft"
+            }`}
+          >
+            <span className={`h-1.5 w-1.5 rounded-full ${connected ? "bg-moss watch-pulse" : "bg-ink-soft/40"}`} />
+            <MonitorCheck className="h-3.5 w-3.5" />
+            {connected ? "Connected" : config.socketStatus || "Disconnected"}
+          </span>
+        }
+      />
 
-      {preferences ? (
-        <div className="settings-group divide-y divide-edge overflow-hidden px-5">
-          <div className="flex items-center justify-between gap-4 py-4">
-            <div className="flex min-w-0 items-start gap-3">
-              <Power className="mt-0.5 h-4 w-4 shrink-0 text-moss" />
-              <div className="min-w-0">
-                <p className="text-[13px] font-medium text-ink">Run Aloe Desktop on startup</p>
-                <p className="mt-0.5 text-xs leading-5 text-ink-soft">Launch Aloe when you sign in to your computer.</p>
-              </div>
-            </div>
-            <Switch checked={preferences.runOnStartup} disabled={busy} label="Run Aloe Desktop on startup" onChange={(enabled) => void update("startup", enabled)} />
-          </div>
-          <div className="flex items-center justify-between gap-4 py-4">
-            <div className="flex min-w-0 items-start gap-3">
-              <MonitorDown className="mt-0.5 h-4 w-4 shrink-0 text-moss" />
-              <div className="min-w-0">
-                <p className="text-[13px] font-medium text-ink">Start minimized</p>
-                <p className="mt-0.5 text-xs leading-5 text-ink-soft">When launched at sign-in, stay in the system tray until opened.</p>
-              </div>
-            </div>
-            <Switch checked={preferences.startMinimized} disabled={busy || !preferences.runOnStartup} label="Start minimized" onChange={(enabled) => void update("minimized", enabled)} />
-          </div>
-          <div className="flex items-center justify-between gap-4 py-4">
-            <div className="flex min-w-0 items-start gap-3">
-              <Info className="mt-0.5 h-4 w-4 shrink-0 text-moss" />
-              <div className="min-w-0">
-                <p className="text-[13px] font-medium text-ink">Aloe Desktop</p>
-                <p className="mt-0.5 text-xs leading-5 text-ink-soft">Version {version ?? "…"}</p>
-              </div>
-            </div>
-          </div>
+      {!connected ? (
+        <div className="mb-6 flex items-start gap-3 rounded-xl border border-clay/40 bg-clay/8 px-4 py-3 text-[13px] leading-5 text-danger">
+          <PlugZap className="mt-0.5 h-4 w-4 shrink-0" />
+          <span>
+            The local agent is {config.socketStatus || "disconnected"}. Aloe can't reach this computer until it reconnects.
+            {config.socketError ? ` ${config.socketError}` : ""}
+          </span>
         </div>
       ) : null}
 
-      {error ? <p className="mt-3 text-xs text-danger">{error}</p> : null}
+      <ControlGroup label="Startup" footnote={error ? <span className="text-danger">{error}</span> : undefined}>
+        <ControlRow
+          icon={Power}
+          title="Run Aloe Desktop on startup"
+          detail="Launch Aloe when you sign in to your computer."
+          control={<Switch checked={config.runOnStartup} disabled={busy} label="Run Aloe Desktop on startup" onChange={(enabled) => void update("startup", enabled)} />}
+        />
+        <ControlRow
+          icon={MonitorDown}
+          title="Start minimized"
+          detail="When launched at sign-in, stay in the system tray until opened."
+          control={
+            <Switch
+              checked={config.startMinimized}
+              disabled={busy || !config.runOnStartup}
+              label="Start minimized"
+              onChange={(enabled) => void update("minimized", enabled)}
+            />
+          }
+        />
+        <ControlRow icon={Info} title="Aloe Desktop" detail={`Version ${version ?? "…"}`} />
+      </ControlGroup>
+
+      <ConnectionPanel config={config} onReset={onReset} />
+      <FoldersPanel folders={config.folders} conversationFolders={config.conversationFolders} onAdd={onAddFolder} onRemove={onRemoveFolder} />
+      <ApprovalsPanel config={config} pending={pending} onRefresh={onRefresh} onSetCommandTrustMode={onSetCommandTrustMode} />
+      <DesktopControlPanel enabled={config.desktopControlEnabled} onSetEnabled={onSetDesktopControl} />
+      <ActivityList actions={config.recentActions} />
     </>
   );
 }

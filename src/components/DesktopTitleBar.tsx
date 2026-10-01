@@ -26,7 +26,6 @@ const ROUTE_TITLES: Array<[test: (path: string) => boolean, title: string]> = [
   [(p) => p === "/app/plans", "Plans"],
   [(p) => p === "/app/usage", "Usage"],
   [(p) => p === "/app/onboarding", "Welcome"],
-  [(p) => p === "/app/desktop", "Desktop controls"],
 ];
 
 const routeTitle = (pathname: string) => ROUTE_TITLES.find(([test]) => test(pathname))?.[1] ?? "Aloe";

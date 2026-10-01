@@ -307,12 +307,12 @@ export default function CodeWorkspace({ config, pendingCount, onAddProject }: Pr
       ) : null}
       <span className="flex-1" />
       {pendingCount > 0 ? (
-        <Link href="/app/desktop" className="inline-flex items-center gap-1.5 rounded-md bg-clay/10 px-2 py-1 font-semibold text-clay hover:bg-clay/15">
+        <Link href="/app/settings?section=desktop" className="inline-flex items-center gap-1.5 rounded-md bg-clay/10 px-2 py-1 font-semibold text-clay hover:bg-clay/15">
           <ShieldAlert className="h-3.5 w-3.5" />
           {pendingCount} command{pendingCount === 1 ? "" : "s"} waiting
         </Link>
       ) : (
-        <Link href="/app/desktop" className="hidden hover:text-ink sm:inline">
+        <Link href="/app/settings?section=desktop" className="hidden hover:text-ink sm:inline">
           {TRUST_LABELS[config.commandTrustMode] ?? TRUST_LABELS.ask}
         </Link>
       )}
