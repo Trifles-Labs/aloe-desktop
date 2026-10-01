@@ -364,6 +364,7 @@ export default function CodeWorkspace({ config, pendingCount, onAddProject }: Pr
       <main className="flex min-w-0 flex-1 flex-col overflow-hidden">
         <ChatPageClient
           routeBase="/app/code"
+          workspace="code"
           messageContext={activeProject ? codeSessionContext(activeProject, branch) : null}
           emptyState={emptyState}
           header={header}
