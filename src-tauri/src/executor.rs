@@ -6,6 +6,7 @@ use tokio::process::Command;
 use tokio_tungstenite::tungstenite::Message;
 
 use crate::browser::dispatch_browser;
+use crate::code_tools::{glob_files, grep_files, write_text_file};
 use crate::computer::{capture_desktop_screenshot, dispatch_desktop_control};
 use crate::config::{add_recent, debug_log, rescan_folder_contexts, save_config, scoped_config, AppState, COMMAND_TIMEOUT_SECONDS};
 use crate::fs::{
@@ -26,8 +27,8 @@ use crate::terminal::{
 /// Job kinds that can change a granted folder's MEMORY.md/AGENTS.md. A completed job of one of
 /// these kinds triggers a background re-scan + re-sync so "remember X for this project" is
 /// reflected on the very next turn instead of waiting for the app to restart.
-const FOLDER_CONTEXT_TRIGGER_KINDS: [&str; 5] =
-    ["create_file", "update_file", "write_local_file", "apply_local_patch", "delete_file"];
+const FOLDER_CONTEXT_TRIGGER_KINDS: [&str; 6] =
+    ["create_file", "update_file", "write_local_file", "write_text_file", "apply_local_patch", "delete_file"];
 
 /// Fire-and-forget: re-scans every granted folder's context and pushes the refresh to the
 /// backend. Best-effort, same as the other outbound syncs in this file — a failure here just
@@ -379,6 +380,10 @@ pub async fn dispatch_tool(
 ) -> Result<Value, String> {
     match job.kind.as_str() {
         "search_local_codebase"  => search_codebase(config, &job.input),
+        // Aloe Code's tools (code_tools.rs).
+        "glob_files"             => glob_files(config, &job.input),
+        "grep_files"             => grep_files(config, &job.input),
+        "write_text_file"        => write_text_file(config, &job.input),
         "list_local_files"       => list_files(config, &job.input),
         "read_local_file"        => read_file(config, &job.input),
         "write_local_file"       => update_file(config, &job.input),

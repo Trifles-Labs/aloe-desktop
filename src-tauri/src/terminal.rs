@@ -175,12 +175,15 @@ pub async fn read_terminal_session(state: &AppState, input: Value) -> Result<Val
 pub async fn wait_terminal_session(state: &AppState, input: Value) -> Result<Value, String> {
     let cursor = input.get("cursor").and_then(Value::as_u64).unwrap_or(0) as usize;
     let timeout = input.get("timeoutSeconds").and_then(Value::as_u64).unwrap_or(30).clamp(1, 45);
+    // Aloe Code's bash waits for the command to finish rather than returning on the first new
+    // output, which would cost a backend round trip per line of a build log.
+    let until_exit = input.get("untilExit").and_then(Value::as_bool).unwrap_or(false);
     let deadline = Instant::now() + Duration::from_secs(timeout);
     loop {
         let result = read_terminal_session(state, input.clone()).await?;
         let next_cursor = result.get("cursor").and_then(Value::as_u64).unwrap_or(0) as usize;
         let running = result.pointer("/status/state").and_then(Value::as_str) == Some("running");
-        if next_cursor > cursor || !running || Instant::now() >= deadline { return Ok(result); }
+        if (next_cursor > cursor && !until_exit) || !running || Instant::now() >= deadline { return Ok(result); }
         sleep(Duration::from_millis(250)).await;
     }
 }

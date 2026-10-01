@@ -1,4 +1,5 @@
 mod browser;
+mod code_tools;
 mod computer;
 mod config;
 mod desktop;

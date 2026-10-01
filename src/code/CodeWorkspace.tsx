@@ -1,11 +1,10 @@
 /* Aloe Code: Aloe as a coding agent on a project folder of this computer.
  *
- * Same engine as chat — the shared ChatPageClient, the backend's agent loop,
- * and the file, search and terminal tools this device already runs for chats
- * sent from here. What makes it a separate mode is the frame around it: every
- * session belongs to one project folder, sessions are listed by project, and
- * each message tells the model which folder it is working in (as hidden
- * context, so the thread shows only what the user typed). */
+ * It shares the chat thread UI (ChatPageClient) and the device's tools, but is
+ * not a chat mode: requests carry `workspace: "code"` and the project path, and
+ * the backend answers them with its own fixed model, tools and system prompt.
+ * The composer drops chat's mode slider, per-chat folder sharing and @mentions.
+ * Every session belongs to one project folder and sessions are listed by project. */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
@@ -409,7 +408,8 @@ export default function CodeWorkspace({ config, pendingCount, onAddProject }: Pr
         <ChatPageClient
           routeBase="/app/code"
           workspace="code"
-          messageContext={activeProject ? codeSessionContext(activeProject, branch) : null}
+          messageContext={activeProject ? codeSessionContext(branch) : null}
+          projectPath={activeProject}
           emptyState={emptyState}
           header={header}
           onConversationId={handleConversationId}

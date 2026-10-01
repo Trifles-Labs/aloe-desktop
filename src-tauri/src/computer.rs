@@ -40,8 +40,9 @@ use crate::notifications;
 use crate::overlay;
 
 // These reach the model as the tool call's error, so each one says what to do next.
-const DISABLED_MESSAGE: &str = "Desktop control is turned off on this computer. Ask the user to turn on \
-    \"Let Aloe control this computer\" in Aloe Desktop. Do not try to get the same result through \
+const DISABLED_MESSAGE: &str = "Desktop control is turned off on this computer, and Aloe Desktop asked the \
+    user to turn it on but they chose not to. Do not ask again or retry; continue without it, or tell \
+    the user what they would need to do themselves. Do not try to get the same result through \
     terminal commands or other tools.";
 const FAILSAFE_MESSAGE: &str = "The user stopped desktop control by moving the pointer into a screen \
     corner, and it is now turned off. Stop the task, tell the user it was stopped, and wait for them \
@@ -201,6 +202,66 @@ pub async fn capture_desktop_screenshot(app: &AppHandle) -> Result<Value, String
     .await?
 }
 
+// ── Asking to turn control on ────────────────────────────────────────────────
+
+/// After "Not now", further requests are refused without asking again for this long, so a model
+/// retrying in a loop cannot turn the dialog into a nag.
+const DECLINE_QUIET_PERIOD: Duration = Duration::from_secs(120);
+
+/// One dialog at a time: actions that arrive while it is open wait for that answer.
+static ASK_LOCK: tokio::sync::Mutex<Option<std::time::Instant>> = tokio::sync::Mutex::const_new(None);
+
+fn control_enabled(app: &AppHandle) -> bool {
+    app.state::<AppState>().config.lock().expect("config mutex").desktop_control_enabled
+}
+
+/// True when desktop control is on, asking the user first if it is off. The question is a native
+/// dialog owned by this app: it is not something the model can click (control is off while it is
+/// up, and Aloe's own windows are off limits anyway), so the switch is still only ever flipped by
+/// the user.
+async fn ensure_enabled_or_ask(app: &AppHandle) -> bool {
+    if control_enabled(app) {
+        return true;
+    }
+    let mut declined_at = ASK_LOCK.lock().await;
+    // Answered "Turn on" while this request was waiting behind the dialog.
+    if control_enabled(app) {
+        return true;
+    }
+    if declined_at.map(|at| at.elapsed() < DECLINE_QUIET_PERIOD).unwrap_or(false) {
+        return false;
+    }
+
+    let handle = app.clone();
+    let accepted = tauri::async_runtime::spawn_blocking(move || {
+        use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind};
+        handle
+            .dialog()
+            .message(
+                "Aloe wants to see and control your screen (mouse and keyboard) to carry out a task. \
+                 You can stop it any time with the Stop button or by moving the pointer into a screen corner.",
+            )
+            .title("Turn on desktop control?")
+            .kind(MessageDialogKind::Info)
+            .buttons(MessageDialogButtons::OkCancelCustom("Turn on".to_string(), "Not now".to_string()))
+            .blocking_show()
+    })
+    .await
+    .unwrap_or(false);
+
+    debug_log("desktop", "control_prompt", format!("accepted={accepted}"));
+    if !accepted {
+        *declined_at = Some(std::time::Instant::now());
+        return false;
+    }
+    *declined_at = None;
+    let state = app.state::<AppState>();
+    let mut config = state.config.lock().expect("config mutex");
+    config.desktop_control_enabled = true;
+    let _ = save_config(&config);
+    true
+}
+
 // ── Actions ──────────────────────────────────────────────────────────────────
 
 /// Entry point for every `desktop_*` job. Each successful action comes back with a fresh
@@ -212,8 +273,7 @@ pub async fn dispatch_desktop_control(app: &AppHandle, kind: &str, input: &Value
         return Ok(json!({ "released": true }));
     }
 
-    let enabled = app.state::<AppState>().config.lock().expect("config mutex").desktop_control_enabled;
-    if !enabled {
+    if !ensure_enabled_or_ask(app).await {
         return Err(DISABLED_MESSAGE.to_string());
     }
     if overlay::mark_active(app) {

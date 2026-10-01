@@ -1,4 +1,4 @@
-import { defineConfig, loadEnv } from "vite";
+import { defineConfig, loadEnv, type ViteDevServer } from "vite";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 import path from "node:path";
@@ -11,8 +11,43 @@ export default defineConfig(({ command, mode }) => {
   const backendUrl = env.ALOE_BACKEND_URL ?? (command === "serve" ? "http://127.0.0.1:8080" : "https://api.247autoarmy.in");
   const frontendUrl = env.ALOE_FRONTEND_URL ?? (command === "serve" ? "http://localhost:3000" : "https://aloe.247autoarmy.in");
 
+  /* Dev only: errors thrown in the Tauri window (see index.html's dev hook) are echoed into this
+     terminal, since a blank window otherwise says nothing about what broke. */
+  const echoWindowErrors = {
+    name: "aloe-echo-window-errors",
+    apply: "serve" as const,
+    configureServer(server: ViteDevServer) {
+      // Reloads every open window, for when the Tauri window is stuck blank and out of reach.
+      server.middlewares.use("/__aloe_reload", (_req, res) => {
+        server.ws.send({ type: "full-reload" });
+        res.statusCode = 204;
+        res.end();
+      });
+      server.middlewares.use("/__aloe_window_error", (req, res) => {
+        let body = "";
+        req.on("data", (chunk) => (body += chunk));
+        req.on("end", () => {
+          console.error(`[window error] ${body}`);
+          res.statusCode = 204;
+          res.end();
+        });
+      });
+    },
+    transformIndexHtml: () => [
+      {
+        tag: "script",
+        injectTo: "head-prepend" as const,
+        children: `const send = (message) => { try { fetch("/__aloe_window_error", { method: "POST", body: String(message).slice(0, 4000), keepalive: true }); } catch {} };
+window.addEventListener("error", (e) => send(e.error?.stack ?? e.message));
+window.addEventListener("unhandledrejection", (e) => send("Unhandled rejection: " + (e.reason?.stack ?? e.reason)));
+const error = console.error;
+console.error = (...args) => { send(args.map((a) => a?.stack ?? (typeof a === "string" ? a : JSON.stringify(a))).join(" ")); error(...args); };`,
+      },
+    ],
+  };
+
   return {
-    plugins: [react(), tailwindcss()],
+    plugins: [react(), tailwindcss(), echoWindowErrors],
     resolve: {
       /* One motion runtime for the whole window: if @aloe/ui ever ends up with
          its own framer-motion, the bundle would carry two MotionConfig contexts

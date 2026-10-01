@@ -37,6 +37,9 @@ tokio = { version = "1", features = ["io-util", "macros", "process", "rt-multi-t
 tokio-tungstenite = { version = "0.28", features = ["rustls-tls-webpki-roots"] }
 uuid = { version = "1", features = ["v4"] }
 walkdir = "2"
+# Aloe Code's glob/grep (code_tools.rs): ripgrep's own walker and glob matcher, so .gitignore is honoured.
+ignore = "0.4"
+globset = "0.4"
 base64 = "0.22"
 # Desktop control (computer.rs): synthetic mouse/keyboard input and primary-display capture.
 enigo = "0.2"

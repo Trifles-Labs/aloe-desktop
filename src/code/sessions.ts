@@ -122,18 +122,11 @@ export function projectName(path: string): string {
   return parts[parts.length - 1] ?? path;
 }
 
-/* What the model is told on every message of a session. Kept short: it rides
-   along with each turn. The tools themselves (file read/edit, search, terminal)
-   are the ones the backend already registers for chats sent from this device. */
-export function codeSessionContext(projectPath: string, branch: string | null): string {
-  return [
-    "This conversation is an Aloe Code session: the user is working with you as a coding agent in a local project on their computer.",
-    `Project folder (working directory): ${projectPath}`,
-    branch ? `Git branch: ${branch}` : null,
-    "Work inside that folder with your local file, search and terminal tools: read the relevant code before changing it, make the edits directly rather than pasting code for the user to apply, and run the project's own build, lint or test commands to check your work when they exist.",
-    "Keep changes focused on what was asked, follow the conventions already in the codebase, and do not touch files outside the project folder.",
-    "Finish with a short summary of what you changed and anything left for the user to do.",
-  ]
-    .filter(Boolean)
-    .join("\n");
+/* What the model is told on every message of a session, beyond what the backend
+   already knows. The coding instructions and the project folder live in the
+   backend's fixed Aloe Code system prompt (it gets the path as `projectPath`);
+   repeating them here put the same paragraph into history once per message.
+   Only the branch is left, since it can change mid-session. */
+export function codeSessionContext(branch: string | null): string | null {
+  return branch ? `Git branch: ${branch}` : null;
 }
