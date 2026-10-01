@@ -49,7 +49,8 @@ export const usePathname = () => useSyncExternalStore(subscribe, currentPath, ()
 
 export const useParams = <T extends Record<string, string | string[] | undefined> = Record<string, string | string[] | undefined>>(): T => {
   const pathname = useSyncExternalStore(subscribe, currentPath, () => "/app/chat");
-  const match = pathname.match(/^\/app\/chat\/([^/]+)$/);
+  // Chat and Aloe Code both put the conversation id in the same place.
+  const match = pathname.match(/^\/app\/(?:chat|code)\/([^/]+)$/);
   return (match ? { conversationId: decodeURIComponent(match[1]) } : {}) as T;
 };
 

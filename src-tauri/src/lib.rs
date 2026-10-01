@@ -7,6 +7,7 @@ mod fs;
 mod models;
 mod notifications;
 mod overlay;
+mod project;
 mod search;
 mod shell;
 mod socket;
@@ -391,6 +392,43 @@ fn search_files(
     search_files_fn(&config, &path, &pattern, case_sensitive)
 }
 
+// ── Aloe Code ─────────────────────────────────────────────────────────────────
+
+/// The branch the Aloe Code header shows for a project. Projects are granted folders, and this
+/// refuses anything else so the UI can't be used to probe the rest of the disk.
+#[tauri::command]
+fn project_git_branch(state: State<AppState>, path: String) -> Result<Option<String>, String> {
+    let config = state.config.lock().expect("config mutex").clone();
+    let root = fs::assert_granted(&config, &path)?;
+    Ok(project::git_branch(&root))
+}
+
+/// "Add project" in Aloe Code. A project is a granted folder like any other — it shows up under
+/// Folder access and is removed there — but unlike `add_folder` this answers with the path the user
+/// picked, including when it was already granted, so the workspace can select it.
+#[tauri::command]
+async fn add_project_folder(app: AppHandle, state: State<'_, AppState>) -> Result<Option<String>, String> {
+    let Some(picked) = app.dialog().file().blocking_pick_folder() else {
+        return Ok(None);
+    };
+    let canonical = std_fs::canonicalize(picked.to_string()).map_err(|e| e.to_string())?;
+    let path_str = canonical.to_string_lossy().to_string();
+    let added = {
+        let mut config = state.config.lock().expect("config mutex");
+        let added = !config.folders.iter().any(|f| f.path == path_str);
+        if added {
+            debug_log("folders", "add_project", format!("path={path_str}"));
+            config.folders.push(make_granted_folder(&canonical));
+            save_config(&config)?;
+        }
+        added
+    };
+    if added {
+        sync_folders(state).await?;
+    }
+    Ok(Some(path_str))
+}
+
 // ── App entry point ───────────────────────────────────────────────────────────
 
 pub fn run() {
@@ -467,6 +505,8 @@ pub fn run() {
             approve_command,
             search_content,
             search_files,
+            project_git_branch,
+            add_project_folder,
         ])
         .setup(|app| {
             desktop::install_tray(app)?;
