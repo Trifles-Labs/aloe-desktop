@@ -32,6 +32,7 @@ import { DEFAULT_CONFIG } from "./types";
 import type { AgentConfig, CommandTrustMode, PendingApproval } from "./types";
 import { errorMessage, GOOGLE_AUTH_EVENT, mintAgentSetupToken, startGoogleAuth } from "./lib/desktop";
 import { useDesktopPlatform } from "./platform";
+import CodeWorkspace from "./code/CodeWorkspace";
 import "./web.css";
 
 /* Routes the web app answers with a redirect. Without them here, a link to
@@ -44,7 +45,7 @@ const ROUTE_ALIASES: Record<string, string> = {
   "/app/mobile-login": "/app/settings?section=devices",
 };
 
-function DesktopRouter({ desktopPage }: { desktopPage: React.ReactNode }) {
+function DesktopRouter({ desktopPage, codePage }: { desktopPage: React.ReactNode; codePage: React.ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
 
@@ -71,6 +72,9 @@ function DesktopRouter({ desktopPage }: { desktopPage: React.ReactNode }) {
     "/app/onboarding": <OnboardingPage />,
     "/app/desktop": desktopPage,
   };
+
+  /* Aloe Code draws its own session sidebar, so it sits outside AppLayout. */
+  if (pathname === "/app/code" || pathname.startsWith("/app/code/")) return <>{codePage}</>;
 
   // Unknown paths — including /app/chat/<id>, which the page reads from the
   // URL itself — land on the chat surface.
@@ -263,6 +267,21 @@ function App() {
     }
   };
 
+  /* Aloe Code's "Add project": the same device grant as Add folder, answered with the picked path. */
+  const addProject = useCallback(async (): Promise<string | null> => {
+    try {
+      const path = await invoke<string | null>("add_project_folder");
+      if (path) {
+        void refresh();
+        toast(`Project ready: ${path.split(/[\\/]/).filter(Boolean).pop() ?? path}`, "success");
+      }
+      return path;
+    } catch (err) {
+      toast(`Could not add project: ${errorMessage(err)}`, "error");
+      return null;
+    }
+  }, [refresh, toast]);
+
   const removeFolder = async (path: string) => {
     try {
       const next = await invoke<AgentConfig>("remove_folder", { path });
@@ -311,6 +330,7 @@ function App() {
           <PlatformProvider value={platform}>
             <Providers>
               <DesktopRouter
+                codePage={<CodeWorkspace config={config} pendingCount={pending.length} onAddProject={addProject} />}
                 desktopPage={
                   <DesktopControls
                     config={config}

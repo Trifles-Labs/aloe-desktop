@@ -109,6 +109,15 @@ The browser never names a path — it can only ask for the dialog, and is told t
 
 Sensitive-path write rules (`.git/`, `node_modules/`, build output, `.env`, keys) apply identically to both kinds.
 
+## Aloe Code
+
+The **Chat | Code** switch in the title bar opens Aloe Code: Aloe as a coding agent working in a project folder on this computer, like Claude Code in the Claude desktop app.
+
+- A **project** is a granted device folder (`Add project folder` uses the same grant as Folder access and shows up there). Sessions are listed in Code mode's own sidebar, grouped by project, and kept out of the chat sidebar.
+- A **session** is an ordinary conversation. Every message carries the project path and git branch to the model as hidden context (an `<aloe-context>` envelope that the thread doesn't display), so the agent knows where to read, edit, and run commands. Tools, approvals and trust modes are the same as in chat.
+- Which conversations are sessions, and their projects, is stored on this device (`localStorage`). A project is a path on this disk, so this mapping only makes sense on this machine anyway.
+- The branch is read from `.git/HEAD` rather than by running `git`, so opening a project never runs code from its repository config.
+
 ## Browser Automation
 
 Aloe drives Chrome (or Chromium/Edge) through the DevTools Protocol on `127.0.0.1:9333`. If something is already listening there, Aloe attaches to it; otherwise it launches the browser itself.

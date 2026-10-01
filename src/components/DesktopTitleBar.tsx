@@ -1,9 +1,10 @@
 import React, { useCallback, useEffect, useState, useSyncExternalStore } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { ArrowLeft, ArrowRight, Leaf, Minus, SquarePen, X } from "lucide-react";
+import { ArrowLeft, ArrowRight, Code2, Leaf, MessagesSquare, Minus, SquarePen, X } from "lucide-react";
 
-import { goBack, goForward, routePosition, subscribeToRoute } from "../shims/next-navigation";
+import { readLastCodeRoute } from "../code/sessions";
+import { goBack, goForward, navigateTo, routePosition, subscribeToRoute } from "../shims/next-navigation";
 
 const appWindow = getCurrentWindow();
 
@@ -12,6 +13,8 @@ const appWindow = getCurrentWindow();
    in it that isn't a control is a drag region. */
 
 const ROUTE_TITLES: Array<[test: (path: string) => boolean, title: string]> = [
+  [(p) => p === "/app/code", "New session"],
+  [(p) => p.startsWith("/app/code/"), "Aloe Code"],
   [(p) => p === "/app/home", "New chat"],
   [(p) => p.startsWith("/app/chat"), "Chat"],
   [(p) => p === "/app/conversations", "Conversations"],
@@ -55,6 +58,37 @@ function HistoryButton({ label, disabled, onClick, children }: { label: string; 
     >
       {children}
     </button>
+  );
+}
+
+const isCodeRoute = (pathname: string) => pathname === "/app/code" || pathname.startsWith("/app/code/");
+
+/* Where Chat mode was last left. Session-only: a fresh launch opens chat at home. */
+let lastChatRoute = "/app/home";
+
+/** Chat | Code, the two ways into Aloe on this computer. Each side reopens where it was left. */
+function ModeSwitch({ code }: { code: boolean }) {
+  const option = (active: boolean, label: string, onClick: () => void, icon: React.ReactNode) => (
+    <button
+      type="button"
+      role="radio"
+      aria-checked={active}
+      title={label}
+      onClick={onClick}
+      className={`press-tap inline-flex h-6 items-center gap-1.5 rounded-md px-2 text-[12px] font-medium transition-colors ${
+        active ? "bg-surface-strong text-ink shadow-[0_1px_2px_rgba(22,33,26,0.12)]" : "text-ink-soft hover:text-ink"
+      }`}
+    >
+      {icon}
+      <span>{label}</span>
+    </button>
+  );
+
+  return (
+    <div role="radiogroup" aria-label="Mode" className="inline-flex items-center gap-0.5 rounded-lg bg-sage-soft/70 p-0.5">
+      {option(!code, "Chat", () => code && navigateTo(lastChatRoute), <MessagesSquare className="h-3.5 w-3.5" />)}
+      {option(code, "Code", () => !code && navigateTo(readLastCodeRoute()), <Code2 className="h-3.5 w-3.5" />)}
+    </div>
   );
 }
 
@@ -117,7 +151,10 @@ export function DesktopTitleBar() {
     };
   }, []);
 
-  const openNewChat = () => window.dispatchEvent(new Event("aloe:new-chat"));
+  const code = isCodeRoute(pathname);
+  if (!code && pathname.startsWith("/app/")) lastChatRoute = `${pathname}${window.location.search}`;
+
+  const openNewChat = () => window.dispatchEvent(new Event(code ? "aloe:new-code-session" : "aloe:new-chat"));
   const toggleMaximize = useCallback(async () => {
     await appWindow.toggleMaximize();
     setMaximized(await appWindow.isMaximized());
@@ -137,7 +174,7 @@ export function DesktopTitleBar() {
         <Leaf className="h-3.5 w-3.5" />
       </span>
 
-      <HistoryButton label="New chat" disabled={false} onClick={openNewChat}>
+      <HistoryButton label={code ? "New session" : "New chat"} disabled={false} onClick={openNewChat}>
         <SquarePen className="h-4 w-4" />
       </HistoryButton>
 
@@ -149,6 +186,12 @@ export function DesktopTitleBar() {
       <HistoryButton label="Forward (Alt+→)" disabled={!canGoForward} onClick={goForward}>
         <ArrowRight className="h-4 w-4" />
       </HistoryButton>
+
+      <span aria-hidden className="mx-1 h-4 w-px bg-edge" />
+
+      <div className="relative z-10">
+        <ModeSwitch code={code} />
+      </div>
 
       <div data-tauri-drag-region className="h-full flex-1" onDoubleClick={() => void toggleMaximize()} />
 
