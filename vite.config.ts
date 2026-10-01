@@ -27,7 +27,17 @@ export default defineConfig(({ command, mode }) => {
       },
     },
     optimizeDeps: {
-      include: ["react", "react-dom", "react/jsx-runtime", "react-dom/client"],
+      include: [
+        "react", "react-dom", "react/jsx-runtime", "react-dom/client",
+        /* What @aloe/ui imports. Excluding a package also stops Vite from
+           scanning its imports, so they are listed here; without pre-bundling,
+           react-markdown's CommonJS dependencies (style-to-js) break in dev with
+           "does not provide an export named 'default'". Keep in step with
+           aloe-ui's package.json. */
+        "clsx", "framer-motion", "lucide-react", "next-themes", "qrcode.react",
+        "react-icons", "react-icons/fc", "react-icons/pi", "react-icons/si",
+        "react-markdown", "rehype-katex", "remark-gfm", "remark-math", "tailwind-merge",
+      ],
       // Shipped as TypeScript source; served as source so the next/* aliases above apply to it.
       exclude: ["@aloe/ui"],
     },
