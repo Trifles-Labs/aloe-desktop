@@ -96,7 +96,11 @@ export default function CodeWorkspace({ config, pendingCount, onAddProject }: Pr
   }, [draftProject, isGranted, projects]);
 
   const activeSession = sessionId ? sessions[sessionId] ?? null : null;
-  const activeProject = activeSession?.projectPath ?? draftProject;
+  /* A session the server knows is Code but this device has no project for: started on
+     another computer, or before a reinstall cleared local storage. Its project is a
+     path on some disk, so it has to be chosen here rather than guessed. */
+  const unassigned = Boolean(sessionId && !activeSession && conversations.some((conversation) => conversation.id === sessionId && conversation.workspace === "code"));
+  const activeProject = activeSession?.projectPath ?? (unassigned ? null : draftProject);
   const branch = useProjectBranch(activeProject && isGranted(activeProject) ? activeProject : null);
 
   /* Read by onConversationId, which fires inside ChatPageClient's effects; a ref
@@ -107,12 +111,25 @@ export default function CodeWorkspace({ config, pendingCount, onAddProject }: Pr
   const conversationsRef = useRef(conversations);
   conversationsRef.current = conversations;
 
+  const sessionIdRef = useRef(sessionId);
+  sessionIdRef.current = sessionId;
+
+  /* Only two ids ever get a project here: a session's first id, sent from the
+     new-session screen (no session in the URL yet), and the server id that later
+     replaces it, which inherits the same project. Opening an existing session
+     also reports its id, and must never be handed whatever project is selected. */
   const handleConversationId = useCallback((conversationId: string) => {
-    const project = activeProjectRef.current;
-    if (!codeSessionFor(conversationId) && project) recordCodeSession(conversationId, project);
-    // Once the server's id arrives, the draft id it replaced points at nothing.
+    if (codeSessionFor(conversationId)) return;
     const draftId = conversationsRef.current.find((conversation) => conversation.id === conversationId)?.clientId;
-    if (draftId && draftId !== conversationId) forgetCodeSession(draftId);
+    const inherited = draftId ? codeSessionFor(draftId) : null;
+    if (inherited) {
+      recordCodeSession(conversationId, inherited.projectPath);
+      // The draft id points at nothing once the server's id has replaced it.
+      if (draftId !== conversationId) forgetCodeSession(draftId!);
+      return;
+    }
+    const project = activeProjectRef.current;
+    if (!sessionIdRef.current && project) recordCodeSession(conversationId, project);
   }, []);
 
   useEffect(() => {
@@ -173,20 +190,25 @@ export default function CodeWorkspace({ config, pendingCount, onAddProject }: Pr
   /* Sessions by project, newest first. Projects with no sessions still get a
      heading, so a freshly added folder is visible and one click from a session. */
   const groups = useMemo(() => {
+    const UNASSIGNED = "";
     const byProject = new Map<string, Array<{ id: string; title: string; createdAt: Date }>>();
     for (const folder of projects) byProject.set(folder.path, []);
     for (const conversation of conversations) {
       const session = sessions[conversation.id];
-      if (!session) continue;
-      const list = byProject.get(session.projectPath) ?? [];
+      if (!session && conversation.workspace !== "code") continue;
+      const key = session?.projectPath ?? UNASSIGNED;
+      const list = byProject.get(key) ?? [];
       list.push({ id: conversation.id, title: stripHiddenContext(conversation.title) || "New session", createdAt: conversation.createdAt });
-      byProject.set(session.projectPath, list);
+      byProject.set(key, list);
     }
-    return [...byProject.entries()].map(([path, items]) => ({
-      path,
-      granted: isGranted(path),
-      items: items.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime()),
-    }));
+    return [...byProject.entries()]
+      .map(([path, items]) => ({
+        path,
+        label: path === UNASSIGNED ? "No project on this computer" : projectName(path),
+        granted: path !== UNASSIGNED && isGranted(path),
+        items: items.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime()),
+      }))
+      .sort((a, b) => Number(a.path === UNASSIGNED) - Number(b.path === UNASSIGNED));
   }, [conversations, isGranted, projects, sessions]);
 
   if (isLoading || !token) {
@@ -197,7 +219,9 @@ export default function CodeWorkspace({ config, pendingCount, onAddProject }: Pr
     );
   }
 
-  const sendBlockedReason = !activeProject
+  const sendBlockedReason = unassigned
+    ? "Choose which project on this computer this session works in."
+    : !activeProject
     ? "Add a project folder to start a session — Aloe Code works inside a folder on this computer."
     : !isGranted(activeProject)
       ? `${projectName(activeProject)} is no longer granted to Aloe. Add it again as a project to continue this session.`
@@ -250,7 +274,27 @@ export default function CodeWorkspace({ config, pendingCount, onAddProject }: Pr
     </div>
   );
 
-  const header = activeProject ? (
+  const header = unassigned && sessionId ? (
+    <div className="flex items-center gap-3 border-b border-edge px-4 py-2 text-xs text-ink-soft sm:px-6">
+      <Folder className="h-3.5 w-3.5 shrink-0 text-clay" />
+      <span>This session has no project on this computer.</span>
+      <span className="flex-1" />
+      {projects.length > 0 ? (
+        <Select
+          className="w-56"
+          value=""
+          placeholder="Choose its project"
+          options={projectOptions}
+          menuAlign="right"
+          onChange={(path) => recordCodeSession(sessionId, path)}
+        />
+      ) : (
+        <button type="button" onClick={() => void addProject()} className="font-semibold text-moss hover:underline">
+          Add a project folder
+        </button>
+      )}
+    </div>
+  ) : activeProject ? (
     <div className="flex items-center gap-3 border-b border-edge px-4 py-2 text-xs text-ink-soft sm:px-6">
       <span className="inline-flex min-w-0 items-center gap-1.5 font-medium text-ink" title={activeProject}>
         <Folder className="h-3.5 w-3.5 shrink-0 text-moss" />
@@ -295,8 +339,8 @@ export default function CodeWorkspace({ config, pendingCount, onAddProject }: Pr
             groups.map((group) => (
               <section key={group.path}>
                 <div className="group/project flex items-center gap-1 px-3">
-                  <p className={cn("min-w-0 flex-1 truncate text-xs font-medium", group.granted ? "text-ink-soft" : "text-ink-soft/50 line-through")} title={group.path}>
-                    {projectName(group.path)}
+                  <p className={cn("min-w-0 flex-1 truncate text-xs font-medium", group.granted || !group.path ? "text-ink-soft" : "text-ink-soft/50 line-through")} title={group.path || undefined}>
+                    {group.label}
                   </p>
                   {group.granted ? (
                     <button
