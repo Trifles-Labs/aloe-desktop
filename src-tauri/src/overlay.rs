@@ -122,12 +122,19 @@ fn minimize_main_window(app: &AppHandle) -> bool {
     true
 }
 
+/// Un-minimizing alone is not enough: the run usually leaves another app in the foreground, and
+/// on Windows a restored window then sits behind it (or just flashes in the taskbar). Showing and
+/// focusing it puts the reply in front of the user.
 fn restore_main_window(app: &AppHandle) {
     if !MINIMIZED_FOR_RUN.swap(false, Ordering::SeqCst) {
         return;
     }
     if let Some(main) = app.get_webview_window("main") {
         let _ = main.unminimize();
+        let _ = main.show();
+        if let Err(error) = main.set_focus() {
+            debug_log("overlay", "restore_focus_error", error.to_string());
+        }
     }
 }
 
