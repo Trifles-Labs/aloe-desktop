@@ -2,6 +2,7 @@ mod browser;
 mod code_tools;
 mod computer;
 mod config;
+mod cursor;
 mod desktop;
 mod executor;
 mod fs;
@@ -510,6 +511,8 @@ pub fn run() {
             add_project_folder,
         ])
         .setup(|app| {
+            // A green pointer a crashed desktop-control run never put back.
+            cursor::restore_left_over();
             desktop::install_tray(app)?;
 
             // Dev builds and portable bundles are not registered by an installer, so claim the
@@ -576,6 +579,12 @@ pub fn run() {
                 desktop::hide_main_window(window.app_handle());
             }
         })
-        .run(tauri::generate_context!())
-        .expect("error while running Aloe Desktop");
+        .build(tauri::generate_context!())
+        .expect("error while running Aloe Desktop")
+        .run(|_app, event| {
+            // Quitting mid-run must not leave the user with Aloe's green pointer.
+            if let tauri::RunEvent::Exit = event {
+                cursor::restore();
+            }
+        });
 }

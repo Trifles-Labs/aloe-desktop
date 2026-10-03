@@ -379,24 +379,70 @@ fn drag(enigo: &mut Enigo, geometry: ScreenGeometry, window: Option<AloeWindow>,
 
     move_to(enigo, from)?;
     enigo.button(Button::Left, Direction::Press).map_err(input_error)?;
-    // Released no matter how the glide went, so a failure can't leave the button held down.
-    let glided = glide(enigo, from, to);
+    // Released no matter how the glide went, so a failure can't leave the button held down. The
+    // glide moves in steps, which matters here too: many apps only start a drag after seeing motion.
+    let glided = glide(enigo, to);
     let released = enigo.button(Button::Left, Direction::Release).map_err(input_error);
     glided?;
     released?;
     Ok(json!({ "action": "drag" }))
 }
 
-/// Moves in steps rather than jumping, since many apps only start a drag after seeing motion.
-fn glide(enigo: &mut Enigo, from: (i32, i32), to: (i32, i32)) -> Result<(), ControlError> {
-    const STEPS: i32 = 12;
-    for step in 1..=STEPS {
-        let x = from.0 + (to.0 - from.0) * step / STEPS;
-        let y = from.1 + (to.1 - from.1) * step / STEPS;
-        enigo.move_mouse(x, y, Coordinate::Abs).map_err(input_error)?;
-        thread::sleep(Duration::from_millis(15));
+/// Pointer travel is timed by distance — a short hop is quick, a trip across the screen still
+/// reads as one motion — and eased in and out, so the user can follow where Aloe is going.
+const GLIDE_MIN_MS: f64 = 180.0;
+const GLIDE_MAX_MS: f64 = 520.0;
+const GLIDE_MS_PER_PX: f64 = 0.22;
+/// Roughly one display frame per step.
+const GLIDE_STEP: Duration = Duration::from_millis(8);
+/// Further than this from where Aloe last put it, the pointer was moved by the user's own hand.
+const USER_NUDGE_PX: i32 = 3;
+const USER_TOOK_POINTER_MESSAGE: &str = "The user moved the mouse while Aloe was moving it, so the action \
+    was not performed. Take a fresh screenshot and decide whether to continue.";
+
+fn glide_duration(from: (i32, i32), to: (i32, i32)) -> f64 {
+    let distance = ((to.0 - from.0) as f64).hypot((to.1 - from.1) as f64);
+    (GLIDE_MIN_MS + distance * GLIDE_MS_PER_PX).min(GLIDE_MAX_MS)
+}
+
+fn ease_in_out_cubic(t: f64) -> f64 {
+    if t < 0.5 {
+        4.0 * t * t * t
+    } else {
+        1.0 - (-2.0 * t + 2.0).powi(3) / 2.0
     }
-    Ok(())
+}
+
+/// Glides the pointer from wherever it is to `to`. Paced by the clock rather than by counting
+/// steps, so a coarse system timer makes the motion choppier, never slower.
+fn glide(enigo: &mut Enigo, to: (i32, i32)) -> Result<(), ControlError> {
+    let from = enigo.location().map_err(input_error)?;
+    if from == to {
+        return Ok(());
+    }
+    let total_ms = glide_duration(from, to);
+    let started = std::time::Instant::now();
+    let mut placed = from;
+    loop {
+        let t = (started.elapsed().as_secs_f64() * 1000.0 / total_ms).min(1.0);
+        let k = ease_in_out_cubic(t);
+        let point = (
+            from.0 + ((to.0 - from.0) as f64 * k).round() as i32,
+            from.1 + ((to.1 - from.1) as f64 * k).round() as i32,
+        );
+        if point != placed {
+            enigo.move_mouse(point.0, point.1, Coordinate::Abs).map_err(input_error)?;
+            placed = point;
+        }
+        if t >= 1.0 {
+            return Ok(());
+        }
+        thread::sleep(GLIDE_STEP);
+        let now = enigo.location().map_err(input_error)?;
+        if (now.0 - placed.0).abs() > USER_NUDGE_PX || (now.1 - placed.1).abs() > USER_NUDGE_PX {
+            return Err(USER_TOOK_POINTER_MESSAGE.to_string().into());
+        }
+    }
 }
 
 fn scroll(enigo: &mut Enigo, geometry: ScreenGeometry, window: Option<AloeWindow>, input: &Value) -> Result<Value, ControlError> {
@@ -532,9 +578,11 @@ fn number(input: &Value, key: &str) -> Result<f64, String> {
     input.get(key).and_then(Value::as_f64).ok_or_else(|| format!("{key} is required and must be a number."))
 }
 
-fn move_to(enigo: &mut Enigo, (x, y): (i32, i32)) -> Result<(), ControlError> {
-    enigo.move_mouse(x, y, Coordinate::Abs).map_err(input_error)?;
-    thread::sleep(Duration::from_millis(30));
+/// Glides there, then holds for a beat so the click (or scroll, or drag) reads as the end of the
+/// motion rather than part of it — and so hover effects at the target have time to settle.
+fn move_to(enigo: &mut Enigo, point: (i32, i32)) -> Result<(), ControlError> {
+    glide(enigo, point)?;
+    thread::sleep(Duration::from_millis(70));
     Ok(())
 }
 
@@ -653,6 +701,37 @@ mod tests {
         let path = std::env::temp_dir().join("aloe-capture-check.jpg");
         std::fs::write(&path, bytes).unwrap();
         println!("wrote {} ({}x{})", path.display(), shot["width"], shot["height"]);
+    }
+
+    #[test]
+    fn glides_take_longer_for_longer_trips_within_bounds() {
+        assert_eq!(glide_duration((0, 0), (1, 0)), GLIDE_MIN_MS + GLIDE_MS_PER_PX);
+        assert!(glide_duration((0, 0), (300, 400)) > glide_duration((0, 0), (30, 40)));
+        assert_eq!(glide_duration((0, 0), (3840, 2160)), GLIDE_MAX_MS);
+    }
+
+    #[test]
+    fn easing_starts_and_ends_at_rest() {
+        assert_eq!(ease_in_out_cubic(0.0), 0.0);
+        assert_eq!(ease_in_out_cubic(0.5), 0.5);
+        assert_eq!(ease_in_out_cubic(1.0), 1.0);
+        assert!(ease_in_out_cubic(0.1) < 0.1 && ease_in_out_cubic(0.9) > 0.9);
+    }
+
+    /// Manual check: `cargo test glide_lands_on_target -- --ignored` glides the real pointer
+    /// across the screen and back. Hands off the mouse while it runs.
+    #[test]
+    #[ignore]
+    fn glide_lands_on_target() {
+        let mut enigo = new_enigo().unwrap();
+        let geometry = display_geometry(&enigo).unwrap();
+        let start = enigo.location().unwrap();
+        let far = geometry.to_display(800.0, 700.0);
+        let began = std::time::Instant::now();
+        glide(&mut enigo, far).unwrap_or_else(|_| panic!("glide was interrupted"));
+        println!("glide took {:?}", began.elapsed());
+        assert_eq!(enigo.location().unwrap(), far);
+        glide(&mut enigo, start).unwrap_or_else(|_| panic!("glide was interrupted"));
     }
 
     #[test]

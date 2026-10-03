@@ -52,7 +52,7 @@ dependencies = [
 
 [[package]]
 name = "aloe-desktop"
-version = "1.4.3"
+version = "1.4.4"
 dependencies = [
  "base64 0.22.1",
  "chrono",
@@ -83,6 +83,7 @@ dependencies = [
  "url",
  "uuid",
  "walkdir",
+ "windows-sys 0.59.0",
  "xcap",
 ]
 

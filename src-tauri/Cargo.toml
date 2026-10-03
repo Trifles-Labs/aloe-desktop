@@ -1,6 +1,6 @@
 [package]
 name = "aloe-desktop"
-version = "1.4.3"
+version = "1.4.4"
 description = "Aloe Desktop local agent"
 authors = ["Aloe"]
 edition = "2021"
@@ -45,6 +45,10 @@ base64 = "0.22"
 enigo = "0.2"
 xcap = "0.0.12"
 image = { version = "0.25", default-features = false, features = ["jpeg"] }
+
+# The green pointer while Aloe is in control (cursor.rs): swaps the system cursor on Windows.
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.59", features = ["Win32_Foundation", "Win32_Graphics_Gdi", "Win32_UI_WindowsAndMessaging"] }
 
 # Reduced debug info to keep dev-build artifacts smaller (this machine runs low on disk
 # during iterative `tauri dev` rebuilds).

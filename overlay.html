@@ -47,6 +47,22 @@
       }
       @keyframes breathe { to { opacity: 1; } }
 
+      /* Aloe's pointer where the system one can't turn green (not Windows; see cursor.rs): a halo
+         under the real pointer, which the OS always draws on top. overlay.rs feeds it positions;
+         until the first one it stays hidden. The short linear transition smooths the polling. */
+      .halo {
+        position: fixed; left: 0; top: 0;
+        width: 34px; height: 34px; margin: -17px 0 0 -17px;
+        border-radius: 999px;
+        pointer-events: none;
+        background: radial-gradient(circle, rgb(var(--glow) / 0.55) 0 35%, rgb(var(--glow) / 0) 70%);
+        box-shadow: 0 0 0 2px rgb(var(--glow) / 0.85);
+        opacity: 0;
+        transition: opacity 250ms var(--ease-out), transform 50ms linear;
+      }
+      html[data-part="pill"] .halo { display: none; }
+      [data-active="true"] .halo[data-placed="true"] { opacity: 1; }
+
       /* Enters from just above and leaves the same way. */
       .pill {
         position: fixed; inset: 0;
@@ -86,12 +102,14 @@
         .pill, [data-active="true"] .pill { transform: none; }
         .glow::after, .dot { animation: none; }
         .glow::after { opacity: 0.5; }
+        .halo { transition: opacity 250ms var(--ease-out); }
       }
     </style>
   </head>
   <body>
     <div id="root" data-active="false">
       <div class="glow" aria-hidden="true"></div>
+      <div class="halo" id="halo" aria-hidden="true"></div>
       <div class="pill" role="status">
         <span class="dot" aria-hidden="true"></span>
         <span class="label">Aloe is using your computer</span>

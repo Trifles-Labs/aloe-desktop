@@ -19,6 +19,7 @@ use std::{
 use tauri::{AppHandle, Emitter, Manager, WebviewUrl, WebviewWindow, WebviewWindowBuilder};
 
 use crate::config::{debug_log, DESKTOP_CONTROL_OVERLAY_IDLE_SECONDS};
+use crate::cursor;
 
 const GLOW_LABEL: &str = "control-glow";
 const PILL_LABEL: &str = "control-pill";
@@ -99,9 +100,48 @@ fn set_active(app: &AppHandle, active: bool) {
     let _ = app.emit(OVERLAY_EVENT, active);
     // An invisible pill must not eat clicks meant for whatever is beneath it.
     set_pill_interactive(app, active);
-    if !active {
+    if active {
+        cursor::apply();
+        spawn_halo_follower(app);
+    } else {
+        cursor::restore();
         restore_main_window(app);
     }
+}
+
+static HALO_RUNNING: AtomicBool = AtomicBool::new(false);
+/// About one display frame: the halo should keep up with the pointer, not trail it.
+const HALO_POLL: Duration = Duration::from_millis(16);
+
+/// Where the system pointer can't turn green (everywhere but Windows, see cursor.rs), the glow
+/// window draws a green halo under it. The pointer can be anywhere — the user moves it too — so its
+/// position is polled while a run is on, and pushed to the page only when it changes.
+fn spawn_halo_follower(app: &AppHandle) {
+    if cfg!(windows) || HALO_RUNNING.swap(true, Ordering::SeqCst) {
+        return;
+    }
+    let app = app.clone();
+    // Blocking: cursor_position waits on the event loop.
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut last = None;
+        while is_active() {
+            if let (Some(glow), Ok(pointer)) = (app.get_webview_window(GLOW_LABEL), app.cursor_position()) {
+                let origin = glow.outer_position().unwrap_or_default();
+                let scale = glow.scale_factor().unwrap_or(1.0);
+                let at = (((pointer.x - origin.x as f64) / scale).round(), ((pointer.y - origin.y as f64) / scale).round());
+                if last != Some(at) {
+                    last = Some(at);
+                    let _ = glow.eval(&format!("window.__aloeOverlayPointer?.({}, {})", at.0, at.1));
+                }
+            }
+            std::thread::sleep(HALO_POLL);
+        }
+        HALO_RUNNING.store(false, Ordering::SeqCst);
+        // A run that started while this was winding down saw it still running and didn't start one.
+        if is_active() {
+            spawn_halo_follower(&app);
+        }
+    });
 }
 
 /// Set only when Aloe itself minimized the window, so a window the user minimized stays down.
