@@ -71,7 +71,7 @@ console.error = (...args) => { send(args.map((a) => a?.stack ?? (typeof a === "s
            aloe-ui's package.json. */
         "clsx", "framer-motion", "lucide-react", "next-themes", "qrcode.react",
         "react-icons", "react-icons/fc", "react-icons/pi", "react-icons/si",
-        "react-markdown", "rehype-katex", "remark-gfm", "remark-math", "tailwind-merge",
+        "katex", "katex/contrib/mhchem", "react-markdown", "rehype-katex", "remark-gfm", "remark-math", "tailwind-merge",
       ],
       // Shipped as TypeScript source; served as source so the next/* aliases above apply to it.
       exclude: ["@aloe/ui"],
