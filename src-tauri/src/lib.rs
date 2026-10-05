@@ -14,6 +14,7 @@ mod search;
 mod shell;
 mod socket;
 mod terminal;
+mod updater;
 
 use serde_json::json;
 use std::{collections::HashMap, fs as std_fs, sync::Mutex};
@@ -479,6 +480,7 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
+        .manage(updater::PendingUpdate::default())
         .manage(AppState {
             config: Mutex::new(initial_config),
             pending: Mutex::new(Vec::new()),
@@ -509,6 +511,8 @@ pub fn run() {
             search_files,
             project_git_branch,
             add_project_folder,
+            updater::download_update,
+            updater::install_update,
         ])
         .setup(|app| {
             // A green pointer a crashed desktop-control run never put back.

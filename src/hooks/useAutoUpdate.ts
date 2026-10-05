@@ -1,7 +1,9 @@
 import { useEffect, useState } from "react";
-import { check } from "@tauri-apps/plugin-updater";
-import { relaunch } from "@tauri-apps/plugin-process";
+import { invoke } from "@tauri-apps/api/core";
 
+// Download and install go through Rust commands (src-tauri/src/updater.rs) rather than the
+// updater plugin's JS API: the plugin's install tears the windows down off the main thread on
+// Windows, which crashed the app instead of restarting it.
 export function useAutoUpdate() {
     const [updateReady, setUpdateReady] = useState(false);
 
@@ -9,10 +11,8 @@ export function useAutoUpdate() {
         let cancelled = false;
         (async () => {
             try {
-                const update = await check();
-                if (!update || cancelled) return;
-                await update.downloadAndInstall();
-                if (!cancelled) setUpdateReady(true);
+                const version = await invoke<string | null>("download_update");
+                if (version && !cancelled) setUpdateReady(true);
             } catch {
                 // silently ignore — update check failure must not disrupt the app
             }
@@ -20,7 +20,7 @@ export function useAutoUpdate() {
         return () => { cancelled = true; };
     }, []);
 
-    const restart = () => relaunch();
+    const restart = () => invoke("install_update");
 
     return { updateReady, restart };
 }
