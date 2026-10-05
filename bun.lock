@@ -5,7 +5,7 @@
     "": {
       "name": "aloe-desktop",
       "dependencies": {
-        "@aloe/ui": "git+ssh://git@github.com/Trifles-Labs/aloe-ui.git#v0.2.5",
+        "@aloe/ui": "git+ssh://git@github.com/Trifles-Labs/aloe-ui.git#v0.2.7",
         "@fontsource-variable/bricolage-grotesque": "^5.3.0",
         "@fontsource-variable/geist-mono": "^5.3.0",
         "@fontsource-variable/instrument-sans": "^5.3.0",
@@ -37,7 +37,7 @@
     "@tauri-apps/cli",
   ],
   "packages": {
-    "@aloe/ui": ["@aloe/ui@git+ssh://git@github.com/Trifles-Labs/aloe-ui.git#3d6d9d2b3e792bd5c80f11b94689506879c15454", { "dependencies": { "clsx": "^2.1.1", "katex": "^0.16.47", "qrcode.react": "^4.2.0", "react-icons": "^5.7.0", "react-markdown": "^10.1.0", "rehype-katex": "^7.0.1", "remark-gfm": "^4.0.1", "remark-math": "^6.0.0", "tailwind-merge": "^3.6.0" }, "peerDependencies": { "framer-motion": "^12.42.0", "lucide-react": "^1.16.0", "next": ">=16", "next-themes": "^0.4.6", "react": "^19.2.0", "react-dom": "^19.2.0", "tailwindcss": "^4.1.0" }, "optionalPeers": ["next"] }, "3d6d9d2b3e792bd5c80f11b94689506879c15454"],
+    "@aloe/ui": ["@aloe/ui@git+ssh://git@github.com/Trifles-Labs/aloe-ui.git#214b4be3627ce8efae5d3c728a5813cec389541b", { "dependencies": { "clsx": "^2.1.1", "katex": "^0.16.47", "qrcode.react": "^4.2.0", "react-icons": "^5.7.0", "react-markdown": "^10.1.0", "rehype-katex": "^7.0.1", "remark-gfm": "^4.0.1", "remark-math": "^6.0.0", "tailwind-merge": "^3.6.0" }, "peerDependencies": { "framer-motion": "^12.42.0", "lucide-react": "^1.16.0", "next": ">=16", "next-themes": "^0.4.6", "react": "^19.2.0", "react-dom": "^19.2.0", "tailwindcss": "^4.1.0" }, "optionalPeers": ["next"] }, "214b4be3627ce8efae5d3c728a5813cec389541b"],
 
     "@babel/code-frame": ["@babel/code-frame@7.29.7", "", { "dependencies": { "@babel/helper-validator-identifier": "^7.29.7", "js-tokens": "^4.0.0", "picocolors": "^1.1.1" } }, "sha512-Aup7aUOfpbAUg2ROOJN6Iw5f9DMBlzu0mIkm/malLQFN/YQgO48wCj0Kxa3sEHJvPVFg7siR+qRInwXd2qhQKw=="],
 
