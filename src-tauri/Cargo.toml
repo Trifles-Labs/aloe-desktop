@@ -1,6 +1,6 @@
 [package]
 name = "aloe-desktop"
-version = "1.4.7"
+version = "1.4.8"
 description = "Aloe Desktop local agent"
 authors = ["Aloe"]
 edition = "2021"
