@@ -52,7 +52,7 @@ dependencies = [
 
 [[package]]
 name = "aloe-desktop"
-version = "1.4.8"
+version = "1.4.9"
 dependencies = [
  "base64 0.22.1",
  "chrono",
