@@ -17,19 +17,30 @@ export const GOOGLE_AUTH_EVENT = "aloe-google-auth";
 /** Open a link in the user's real browser rather than inside the app window. */
 export const openExternal = (url: string) => invoke<void>("open_external_url", { url });
 
+/** Lowercase hex SHA-256, matching how the backend seals a sign-in binding into OAuth state. */
+async function sha256Hex(value: string): Promise<string> {
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value));
+  return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
 /**
  * Starts the Google sign-in flow: the backend returns a URL flagged as a desktop flow, and the
  * browser it opens will hand the finished session back through the `aloe://` deep link.
+ *
+ * The backend also issues a binding for this flow. Its hash is registered with the Rust side
+ * before the browser opens, and a deep link is only accepted when it carries that same hash —
+ * so a web page that opens `aloe://auth/callback` on its own can't sign this app in.
  */
 export async function startGoogleAuth(): Promise<void> {
   const response = await fetch(`${API_URL}/api/auth/google?desktop=1`);
   if (!response.ok) {
     throw new Error(`Failed to start Google sign in (${response.status})`);
   }
-  const data = (await response.json().catch(() => ({}))) as { url?: string };
-  if (!data.url) {
-    throw new Error("Failed to start Google sign in: missing url");
+  const data = (await response.json().catch(() => ({}))) as { url?: string; binding?: string };
+  if (!data.url || !data.binding) {
+    throw new Error("Failed to start Google sign in: incomplete response");
   }
+  await invoke<void>("begin_google_sign_in", { bindingHash: await sha256Hex(data.binding) });
   await openExternal(data.url);
 }
 

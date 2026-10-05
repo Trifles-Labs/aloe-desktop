@@ -70,12 +70,22 @@ pub const MAX_PERSISTED_HISTORY: usize = 50;
 /// more rows than this file is willing to keep.
 pub const MAX_CONVERSATION_FOLDERS: usize = 200;
 
+/// A Google sign-in started from this app: the SHA-256 (hex) of the binding secret the backend
+/// sealed into that flow's OAuth state, and when the flow began.
+pub struct PendingSignIn {
+    pub binding_hash: String,
+    pub started_at: std::time::Instant,
+}
+
 pub struct AppState {
     pub config: Mutex<AgentConfig>,
     pub pending: Mutex<Vec<PendingApproval>>,
     /// A Google OAuth token handed to the app through the `aloe://` deep link while the
     /// frontend wasn't ready to receive it. `take_pending_oauth_token` drains it once.
     pub pending_oauth: Mutex<Option<String>>,
+    /// The Google sign-in this app started, if one is in flight. A deep-link token is only
+    /// accepted when it carries this flow's binding — see `store_oauth_token` in lib.rs.
+    pub pending_sign_in: Mutex<Option<PendingSignIn>>,
     pub terminals: Mutex<HashMap<String, TerminalSession>>,
     pub client: Client,
     /// Set while the socket is connected; lets code outside socket.rs (e.g.

@@ -152,6 +152,11 @@ pub async fn post_result(
 
 // ── Job dispatch ──────────────────────────────────────────────────────────────
 
+/// Job kinds that run something on the user's machine, and so go through the command-trust gate.
+fn requires_command_approval(kind: &str) -> bool {
+    matches!(kind, "run_command" | "run_local_command" | "start_terminal_session" | "write_terminal_session")
+}
+
 pub async fn execute_job(app: AppHandle, job: AgentJob) {
     debug_log("job", "received", format!("job_id={} kind={}", job.id, job.kind));
     let state = app.state::<AppState>();
@@ -165,7 +170,9 @@ pub async fn execute_job(app: AppHandle, job: AgentJob) {
 
     // Commands require explicit approval, unless "all" (run anything) or "auto" (ask Aloe's own
     // model to judge this specific command against the conversation it came from) says otherwise.
-    if job.kind == "run_command" || job.kind == "run_local_command" || job.kind == "start_terminal_session" {
+    // Input typed into a running terminal session counts as a command too: approving `python` or a
+    // shell must not let everything sent to it afterwards run unseen.
+    if requires_command_approval(&job.kind) {
         if config.command_trust_mode == "all" {
             run_approved_command(&app, &state, &config, job, json!({ "mode": "all" })).await;
             return;
@@ -219,11 +226,7 @@ pub async fn execute_job(app: AppHandle, job: AgentJob) {
 /// chat card can show what cleared the command alongside what the command did.
 async fn run_approved_command(app: &AppHandle, state: &tauri::State<'_, AppState>, config: &AgentConfig, job: AgentJob, approval: Value) {
     let input_snapshot = job.input.clone();
-    let result = if job.kind == "start_terminal_session" {
-        start_terminal_session(state, config.clone(), job.input.clone()).await
-    } else {
-        run_command(config.clone(), job.input.clone()).await
-    };
+    let result = dispatch_tool(app, state, config, &job).await;
     let result = result.map(|value| with_approval(value, approval));
     let (status, output, error) = outcome(result);
     post_result(state, config, &job.id, status, output.clone(), error.clone()).await;
@@ -294,14 +297,31 @@ async fn reject_command(
 /// safety check could not be reached at all. A check that ran and said no does not come here any
 /// more; see `reject_command`.
 fn queue_for_approval(state: &tauri::State<AppState>, app: &AppHandle, job: AgentJob) {
+    let (command, cwd, default_reason) = if job.kind == "write_terminal_session" {
+        // Shown as what it is: text typed into a session that is already running, named by the
+        // command that session runs so the user can tell what will interpret it.
+        let session = input_string(&job.input, "sessionId")
+            .ok()
+            .and_then(|id| state.terminals.lock().expect("terminal sessions mutex").get(&id).cloned());
+        let text = input_string(&job.input, "input").unwrap_or_default();
+        match session {
+            Some(session) => (text, session.cwd, format!("Aloe wants to type this into the running terminal session `{}`.", session.command)),
+            None => (text, String::new(), "Aloe wants to type this into a running terminal session.".to_string()),
+        }
+    } else {
+        (
+            input_string(&job.input, "command").unwrap_or_default(),
+            input_string(&job.input, "cwd").unwrap_or_default(),
+            "Aloe requested this command.".to_string(),
+        )
+    };
     let pending = PendingApproval {
         job_id: job.id.clone(),
         job_kind: job.kind.clone(),
         conversation_id: job.conversation_id.clone(),
-        command: input_string(&job.input, "command").unwrap_or_default(),
-        cwd: input_string(&job.input, "cwd").unwrap_or_default(),
-        reason: input_string(&job.input, "reason")
-            .unwrap_or_else(|_| "Aloe requested this command.".to_string()),
+        command,
+        cwd,
+        reason: input_string(&job.input, "reason").unwrap_or(default_reason),
         requested_at: Utc::now().to_rfc3339(),
         input: job.input,
     };
@@ -421,12 +441,31 @@ pub async fn dispatch_tool(
     }
 }
 
-async fn open_local_url(input: &Value) -> Result<Value, String> {
-    let url = input_string(input, "url")?;
-    let allowed = url.contains("://") || url.starts_with("mailto:") || url.starts_with("tel:");
-    if !allowed {
-        return Err("URL must include a scheme such as https://, http://, mailto:, or tel:.".to_string());
+/// The schemes `open_local_url` may hand to the OS. Anything else is refused: the OS opener runs
+/// whatever handler a scheme maps to, so `file:` launches executables, a UNC path runs a binary
+/// off a remote share, and handlers like `ms-msdt:` or `search-ms:` have been exploit vectors.
+/// This job runs without command approval, so it must never be able to start a program.
+const OPENABLE_URL_SCHEMES: [&str; 4] = ["http", "https", "mailto", "tel"];
+
+fn checked_open_url(raw: &str) -> Result<String, String> {
+    let parsed = url::Url::parse(raw.trim())
+        .map_err(|_| "URL must be absolute, such as https://example.com.".to_string())?;
+    if !OPENABLE_URL_SCHEMES.contains(&parsed.scheme()) {
+        return Err(format!(
+            "Aloe Desktop only opens http, https, mailto and tel links, not {}: links.",
+            parsed.scheme()
+        ));
     }
+    if matches!(parsed.scheme(), "http" | "https") && parsed.host_str().map_or(true, str::is_empty) {
+        return Err("URL must include a host.".to_string());
+    }
+    // The re-serialized form, not the raw input: it is what was checked, and it carries no stray
+    // whitespace or quoting for the Windows FileProtocolHandler to reinterpret.
+    Ok(parsed.to_string())
+}
+
+async fn open_local_url(input: &Value) -> Result<Value, String> {
+    let url = checked_open_url(&input_string(input, "url")?)?;
 
     let status = if cfg!(target_os = "windows") {
         let mut cmd = Command::new("rundll32");
@@ -496,4 +535,42 @@ async fn show_notification(app: &AppHandle, input: &Value) -> Result<Value, Stri
         "message": message,
         "shown": true,
     }))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn open_url_allows_web_and_contact_links() {
+        assert_eq!(checked_open_url("https://example.com/a?b=1").unwrap(), "https://example.com/a?b=1");
+        assert!(checked_open_url("http://localhost:3000").is_ok());
+        assert!(checked_open_url("mailto:someone@example.com").is_ok());
+        assert!(checked_open_url("tel:+15551234567").is_ok());
+    }
+
+    #[test]
+    fn open_url_refuses_schemes_that_can_launch_programs() {
+        for url in [
+            "file:///C:/Windows/System32/calc.exe",
+            "file://attacker.example/share/payload.exe",
+            "ms-msdt:/id PCWDiagnostic",
+            "search-ms:query=x&crumb=location:\\\\attacker\\share",
+            "javascript:alert(1)",
+            "C:\\Windows\\System32\\calc.exe",
+            "\\\\attacker\\share\\payload.exe",
+        ] {
+            assert!(checked_open_url(url).is_err(), "should refuse {url}");
+        }
+    }
+
+    #[test]
+    fn terminal_input_needs_the_same_approval_as_commands() {
+        for kind in ["run_command", "run_local_command", "start_terminal_session", "write_terminal_session"] {
+            assert!(requires_command_approval(kind), "{kind} should need approval");
+        }
+        for kind in ["read_terminal_session", "list_terminal_sessions", "stop_terminal_session", "read_file"] {
+            assert!(!requires_command_approval(kind), "{kind} should not need approval");
+        }
+    }
 }

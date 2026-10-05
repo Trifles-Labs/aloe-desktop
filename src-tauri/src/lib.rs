@@ -70,17 +70,71 @@ const OAUTH_DEEP_LINK_SCHEME: &str = "aloe";
 /// Event the frontend listens for when a deep link arrives while the app is running.
 const OAUTH_TOKEN_EVENT: &str = "aloe-google-auth";
 
-fn oauth_token_from_url(url: &url::Url) -> Option<String> {
+/// How long a sign-in started from this app stays open to its deep link.
+const SIGN_IN_WINDOW: std::time::Duration = std::time::Duration::from_secs(10 * 60);
+
+/// A token handed back through `aloe://auth/callback?token=…&binding=…`. `binding` is the hash
+/// the backend sealed into the flow's signed OAuth state, echoed by the web callback page.
+struct DeepLinkSignIn {
+    token: String,
+    binding_hash: String,
+}
+
+fn oauth_token_from_url(url: &url::Url) -> Option<DeepLinkSignIn> {
     if url.scheme() != OAUTH_DEEP_LINK_SCHEME
         || url.host_str() != Some("auth")
         || url.path() != "/callback"
     {
         return None;
     }
-    url.query_pairs()
-        .find(|(key, _)| key == "token")
-        .map(|(_, value)| value.into_owned())
-        .filter(|token| !token.is_empty())
+    let param = |name: &str| {
+        url.query_pairs()
+            .find(|(key, _)| key == name)
+            .map(|(_, value)| value.into_owned())
+            .filter(|value| !value.is_empty())
+    };
+    Some(DeepLinkSignIn { token: param("token")?, binding_hash: param("binding")? })
+}
+
+/// Whether a deep-link sign-in belongs to the flow this app started. Any web page can open an
+/// `aloe://` link, so a token alone proves nothing: without this, a page could sign the app into
+/// the attacker's account and pair this computer to it. Only the flow this app began, within its
+/// window, carries the matching binding; a match consumes it so a link can't be replayed.
+fn claim_pending_sign_in(app: &AppHandle, binding_hash: &str) -> bool {
+    let state = app.state::<AppState>();
+    let mut pending = state.pending_sign_in.lock().expect("pending sign-in mutex");
+    let matches = pending.as_ref().is_some_and(|flow| {
+        flow.started_at.elapsed() <= SIGN_IN_WINDOW && flow.binding_hash.eq_ignore_ascii_case(binding_hash)
+    });
+    if matches {
+        *pending = None;
+    }
+    matches
+}
+
+/// Called by the frontend right before it opens the browser for Google sign-in, with the hash of
+/// the binding the backend issued for that flow. Replaces any earlier unfinished attempt.
+#[tauri::command]
+fn begin_google_sign_in(state: State<AppState>, binding_hash: String) -> Result<(), String> {
+    let binding_hash = binding_hash.trim().to_ascii_lowercase();
+    if binding_hash.len() != 64 || !binding_hash.bytes().all(|b| b.is_ascii_hexdigit()) {
+        return Err("Invalid sign-in binding.".to_string());
+    }
+    *state.pending_sign_in.lock().expect("pending sign-in mutex") = Some(config::PendingSignIn {
+        binding_hash,
+        started_at: std::time::Instant::now(),
+    });
+    Ok(())
+}
+
+/// Accepts a deep-link sign-in only if it finishes the flow this app started (see
+/// `claim_pending_sign_in`), then hands the token to the frontend.
+fn accept_deep_link_sign_in(app: &AppHandle, sign_in: DeepLinkSignIn) {
+    if !claim_pending_sign_in(app, &sign_in.binding_hash) {
+        debug_log("auth", "deep_link_rejected", "no matching sign-in in progress".to_string());
+        return;
+    }
+    store_oauth_token(app, sign_in.token);
 }
 
 /// Records the signed-in token so the frontend can pick it up, and nudges the frontend if it is
@@ -454,8 +508,8 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| {
             // On Windows/Linux a deep link launches a second instance; single-instance forwards
-            // the URL argument here. `store_oauth_token` also shows the window, so a sign-in
-            // deep link both lands and brings the app forward.
+            // the URL argument here. An accepted sign-in also shows the window, so the deep link
+            // both lands and brings the app forward.
             //
             // argv[0] is the exe's own path, and on Windows a leading drive letter (`C:\...`)
             // parses as a valid URL with scheme "c" — so this must keep scanning past the first
@@ -466,7 +520,10 @@ pub fn run() {
                 .filter_map(|arg| url::Url::parse(arg).ok())
                 .find_map(|url| oauth_token_from_url(&url))
             {
-                Some(token) => store_oauth_token(app, token),
+                Some(sign_in) => {
+                    accept_deep_link_sign_in(app, sign_in);
+                    desktop::show_main_window(app);
+                }
                 None => desktop::show_main_window(app),
             }
         }))
@@ -485,6 +542,7 @@ pub fn run() {
             config: Mutex::new(initial_config),
             pending: Mutex::new(Vec::new()),
             pending_oauth: Mutex::new(None),
+            pending_sign_in: Mutex::new(None),
             terminals: Mutex::new(HashMap::new()),
             client: reqwest::Client::new(),
             outbound: Mutex::new(None),
@@ -493,6 +551,7 @@ pub fn run() {
             get_config,
             get_pending_approvals,
             take_pending_oauth_token,
+            begin_google_sign_in,
             hide_main_window,
             open_external_url,
             set_run_on_startup,
@@ -528,18 +587,19 @@ pub fn run() {
             let handle = app.handle().clone();
             app.deep_link().on_open_url(move |event| {
                 for url in event.urls() {
-                    if let Some(token) = oauth_token_from_url(&url) {
-                        store_oauth_token(&handle, token);
+                    if let Some(sign_in) = oauth_token_from_url(&url) {
+                        accept_deep_link_sign_in(&handle, sign_in);
                     }
                 }
             });
 
-            // Cold start: the app was launched BY a deep link, so no listener existed when the
-            // plugin parsed the argument — the URL is only available through `get_current()`.
+            // Cold start: the app was launched BY a deep link. No sign-in can be in flight in a
+            // process that just started, so the token is refused (see claim_pending_sign_in) —
+            // this still runs so the refusal is logged rather than the link silently ignored.
             if let Ok(Some(urls)) = app.deep_link().get_current() {
                 for url in urls {
-                    if let Some(token) = oauth_token_from_url(&url) {
-                        store_oauth_token(app.handle(), token);
+                    if let Some(sign_in) = oauth_token_from_url(&url) {
+                        accept_deep_link_sign_in(app.handle(), sign_in);
                     }
                 }
             }
@@ -591,4 +651,27 @@ pub fn run() {
                 cursor::restore();
             }
         });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn deep_link_needs_both_token_and_binding() {
+        let url = url::Url::parse("aloe://auth/callback?token=abc&binding=def").unwrap();
+        let sign_in = oauth_token_from_url(&url).expect("parsed");
+        assert_eq!(sign_in.token, "abc");
+        assert_eq!(sign_in.binding_hash, "def");
+
+        for raw in [
+            "aloe://auth/callback?token=abc",
+            "aloe://auth/callback?binding=def",
+            "aloe://auth/callback?token=&binding=def",
+            "aloe://other/callback?token=abc&binding=def",
+            "https://auth/callback?token=abc&binding=def",
+        ] {
+            assert!(oauth_token_from_url(&url::Url::parse(raw).unwrap()).is_none(), "should reject {raw}");
+        }
+    }
 }
