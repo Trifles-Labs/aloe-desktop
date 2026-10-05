@@ -212,7 +212,7 @@ const DECLINE_QUIET_PERIOD: Duration = Duration::from_secs(120);
 static ASK_LOCK: tokio::sync::Mutex<Option<std::time::Instant>> = tokio::sync::Mutex::const_new(None);
 
 fn control_enabled(app: &AppHandle) -> bool {
-    app.state::<AppState>().config.lock().expect("config mutex").desktop_control_enabled
+    app.state::<AppState>().config.lock().unwrap_or_else(std::sync::PoisonError::into_inner).desktop_control_enabled
 }
 
 /// True when desktop control is on, asking the user first if it is off. The question is a native
@@ -256,7 +256,7 @@ async fn ensure_enabled_or_ask(app: &AppHandle) -> bool {
     }
     *declined_at = None;
     let state = app.state::<AppState>();
-    let mut config = state.config.lock().expect("config mutex");
+    let mut config = state.config.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
     config.desktop_control_enabled = true;
     let _ = save_config(&config);
     true
@@ -329,7 +329,7 @@ fn perform(kind: &str, input: &Value, window: Option<AloeWindow>) -> Result<Valu
     let geometry = display_geometry(&enigo)?;
 
     let pointer = enigo.location().map_err(input_error)?;
-    let left_by_aloe = *LAST_POINTER.lock().expect("pointer mutex") == Some(pointer);
+    let left_by_aloe = *LAST_POINTER.lock().unwrap_or_else(std::sync::PoisonError::into_inner) == Some(pointer);
     if geometry.in_corner(pointer) && !left_by_aloe {
         return Err(ControlError::Failsafe);
     }
@@ -348,7 +348,7 @@ fn perform(kind: &str, input: &Value, window: Option<AloeWindow>) -> Result<Valu
         _ => return Err(format!("Unknown desktop control action: {kind}").into()),
     };
 
-    *LAST_POINTER.lock().expect("pointer mutex") = enigo.location().ok();
+    *LAST_POINTER.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = enigo.location().ok();
     Ok(summary)
 }
 
@@ -637,7 +637,7 @@ fn guard_keyboard(window: Option<AloeWindow>) -> Result<(), ControlError> {
 pub fn disable_desktop_control(app: &AppHandle) {
     {
         let state = app.state::<AppState>();
-        let mut config = state.config.lock().expect("config mutex");
+        let mut config = state.config.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         config.desktop_control_enabled = false;
         let _ = save_config(&config);
     }

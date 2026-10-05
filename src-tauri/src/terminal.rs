@@ -33,10 +33,15 @@ pub struct TerminalSession {
 }
 
 fn append_output(buffer: &Arc<Mutex<String>>, stream: &str, text: &str) {
-    let mut output = buffer.lock().expect("terminal output mutex");
+    let mut output = buffer.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
     output.push_str(&format!("[{stream}] {text}"));
     if output.len() > MAX_BUFFER_BYTES {
-        let keep_from = output.len().saturating_sub(MAX_BUFFER_BYTES);
+        // Forward to a char boundary, so the cut never splits a multi-byte character (a panic here
+        // also poisoned this buffer's mutex for every later read).
+        let mut keep_from = output.len().saturating_sub(MAX_BUFFER_BYTES);
+        while !output.is_char_boundary(keep_from) {
+            keep_from += 1;
+        }
         let next = output[keep_from..].to_string();
         *output = next;
     }
@@ -114,7 +119,7 @@ pub async fn start_terminal_session(
         .expect("terminal sessions mutex")
         .insert(session_id.clone(), session);
     {
-        let mut stored = state.config.lock().expect("config mutex");
+        let mut stored = state.config.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         stored.terminal_sessions.insert(0, PersistedTerminalSession { session_id: session_id.clone(), command: command.clone(), cwd: cwd.to_string_lossy().to_string(), started_at: Utc::now().to_rfc3339(), status: "running".to_string(), exit_code: None });
         stored.terminal_sessions.truncate(50);
         let _ = save_config(&stored);
@@ -145,14 +150,14 @@ pub async fn read_terminal_session(state: &AppState, input: Value) -> Result<Val
         None => json!({ "state": "running", "exitCode": null }),
     };
     if status.get("state").and_then(Value::as_str) == Some("exited") {
-        let mut stored = state.config.lock().expect("config mutex");
+        let mut stored = state.config.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         if let Some(item) = stored.terminal_sessions.iter_mut().find(|item| item.session_id == session_id) {
             item.status = "exited".to_string();
             item.exit_code = status.get("exitCode").and_then(Value::as_i64).map(|value| value as i32);
         }
         let _ = save_config(&stored);
     }
-    let output = session.output.lock().expect("terminal output mutex").clone();
+    let output = session.output.lock().unwrap_or_else(std::sync::PoisonError::into_inner).clone();
     let cursor = input.get("cursor").and_then(Value::as_u64).unwrap_or(0) as usize;
     let max_bytes = input.get("maxBytes").and_then(Value::as_u64).unwrap_or(64_000).clamp(1_024, MAX_BUFFER_BYTES as u64) as usize;
     let safe_cursor = if cursor <= output.len() && output.is_char_boundary(cursor) { cursor } else { 0 };
@@ -230,7 +235,7 @@ pub async fn stop_terminal_session(state: &AppState, input: Value) -> Result<Val
     }
     let _ = child.kill().await;
     {
-        let mut stored = state.config.lock().expect("config mutex");
+        let mut stored = state.config.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         if let Some(item) = stored.terminal_sessions.iter_mut().find(|item| item.session_id == session_id) { item.status = "stopped".to_string(); }
         let _ = save_config(&stored);
     }
@@ -263,11 +268,27 @@ pub async fn list_terminal_sessions(state: &AppState) -> Result<Value, String> {
     }
 
     let active_ids = items.iter().filter_map(|item| item.get("sessionId").and_then(Value::as_str).map(str::to_string)).collect::<Vec<_>>();
-    let stored = state.config.lock().expect("config mutex");
+    let stored = state.config.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
     for session in &stored.terminal_sessions {
         if !active_ids.iter().any(|id| *id == session.session_id) {
             items.push(json!({ "sessionId": session.session_id, "cwd": session.cwd, "command": session.command, "startedAt": session.started_at, "status": { "state": session.status, "exitCode": session.exit_code } }));
         }
     }
     Ok(json!({ "sessions": items, "commandTimeoutSeconds": COMMAND_TIMEOUT_SECONDS }))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn trimming_the_buffer_never_splits_a_character() {
+        let buffer = Arc::new(Mutex::new(String::new()));
+        // Multi-byte output well past the cap, so the trim point has to land mid-character.
+        for _ in 0..3 {
+            append_output(&buffer, "stdout", &"✔ done — ok\n".repeat(MAX_BUFFER_BYTES / 10));
+        }
+        let output = buffer.lock().unwrap();
+        assert!(output.len() <= MAX_BUFFER_BYTES + 3);
+    }
 }

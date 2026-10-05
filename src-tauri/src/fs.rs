@@ -33,7 +33,13 @@ pub fn assert_granted(config: &AgentConfig, raw_path: &str) -> Result<PathBuf, S
     Err(format!("Path is outside Aloe granted folders: {raw_path}"))
 }
 
-pub fn assert_safe_write(path: &Path) -> Result<(), String> {
+/// Writes to these paths (secrets, VCS internals, generated output) are refused unless the job
+/// carries `allowSensitive: true`, which the backend sets only after the user approved that
+/// path in the conversation.
+pub fn assert_safe_write(path: &Path, input: &Value) -> Result<(), String> {
+    if input.get("allowSensitive").and_then(Value::as_bool) == Some(true) {
+        return Ok(());
+    }
     let normalized = path.to_string_lossy().replace('\\', "/").to_lowercase();
     let filename = path.file_name().map(|v| v.to_string_lossy().to_lowercase()).unwrap_or_default();
     let blocked = normalized.contains("/.git/")
@@ -60,6 +66,18 @@ pub fn assert_safe_write(path: &Path) -> Result<(), String> {
 /// Cap per file (MEMORY.md, AGENTS.md) and, doubled, for their combined content — keeps a
 /// folder's contribution to the system prompt bounded no matter how large the file on disk is.
 pub const MAX_FOLDER_CONTEXT_BYTES: usize = 4_000;
+
+/// The largest index <= `index` that is a char boundary of `value` (std's is still unstable).
+pub fn floor_char_boundary(value: &str, index: usize) -> usize {
+    if index >= value.len() {
+        return value.len();
+    }
+    let mut end = index;
+    while !value.is_char_boundary(end) {
+        end -= 1;
+    }
+    end
+}
 
 fn truncate_str(value: &str, max_bytes: usize) -> String {
     if value.len() <= max_bytes {
@@ -188,7 +206,7 @@ pub fn attach_file(config: &AgentConfig, input: &Value) -> Result<Value, String>
 
 pub fn create_file(config: &AgentConfig, input: &Value) -> Result<Value, String> {
     let path = assert_granted(config, &input_string(input, "path")?)?;
-    assert_safe_write(&path)?;
+    assert_safe_write(&path, input)?;
     if path.exists() {
         return Err(format!("File already exists: {}", path.display()));
     }
@@ -206,7 +224,7 @@ pub fn create_file(config: &AgentConfig, input: &Value) -> Result<Value, String>
 // name an existing folder, so this is a clearer failure than silently creating a tree.
 pub fn write_binary_file(config: &AgentConfig, input: &Value) -> Result<Value, String> {
     let path = assert_granted(config, &input_string(input, "path")?)?;
-    assert_safe_write(&path)?;
+    assert_safe_write(&path, input)?;
 
     let bytes = BASE64
         .decode(input_string(input, "base64")?)
@@ -229,7 +247,7 @@ pub fn write_binary_file(config: &AgentConfig, input: &Value) -> Result<Value, S
 // past silently.
 pub fn update_file(config: &AgentConfig, input: &Value) -> Result<Value, String> {
     let path = assert_granted(config, &input_string(input, "path")?)?;
-    assert_safe_write(&path)?;
+    assert_safe_write(&path, input)?;
 
     let old_string = input_string(input, "oldString")?;
     let new_string = input_string(input, "newString")?;
@@ -290,7 +308,7 @@ pub fn update_file(config: &AgentConfig, input: &Value) -> Result<Value, String>
 
 pub fn delete_file(config: &AgentConfig, input: &Value) -> Result<Value, String> {
     let path = assert_granted(config, &input_string(input, "path")?)?;
-    assert_safe_write(&path)?;
+    assert_safe_write(&path, input)?;
     if !path.is_file() {
         return Err(format!("Path is not a file: {}", path.display()));
     }
@@ -302,7 +320,7 @@ pub fn delete_file(config: &AgentConfig, input: &Value) -> Result<Value, String>
 
 pub fn create_folder(config: &AgentConfig, input: &Value) -> Result<Value, String> {
     let path = assert_granted(config, &input_string(input, "path")?)?;
-    assert_safe_write(&path)?;
+    assert_safe_write(&path, input)?;
     fs::create_dir_all(&path).map_err(|e| e.to_string())?;
     Ok(json!({ "path": path.to_string_lossy(), "created": true }))
 }
@@ -310,8 +328,8 @@ pub fn create_folder(config: &AgentConfig, input: &Value) -> Result<Value, Strin
 pub fn update_folder(config: &AgentConfig, input: &Value) -> Result<Value, String> {
     let path = assert_granted(config, &input_string(input, "path")?)?;
     let new_path = assert_granted(config, &input_string(input, "newPath")?)?;
-    assert_safe_write(&path)?;
-    assert_safe_write(&new_path)?;
+    assert_safe_write(&path, input)?;
+    assert_safe_write(&new_path, input)?;
     if !path.is_dir() {
         return Err(format!("Path is not a folder: {}", path.display()));
     }
@@ -321,7 +339,7 @@ pub fn update_folder(config: &AgentConfig, input: &Value) -> Result<Value, Strin
 
 pub fn delete_folder(config: &AgentConfig, input: &Value) -> Result<Value, String> {
     let path = assert_granted(config, &input_string(input, "path")?)?;
-    assert_safe_write(&path)?;
+    assert_safe_write(&path, input)?;
     if !path.is_dir() {
         return Err(format!("Path is not a folder: {}", path.display()));
     }
@@ -410,7 +428,7 @@ pub async fn apply_patch(config: AgentConfig, input: Value) -> Result<Value, Str
     let root = assert_granted(&config, &input_string(&input, "path")?)?;
     let patch = normalize_patch(&input_string(&input, "patch")?);
     for relative in patch_target_paths(&patch)? {
-        assert_safe_write(&root.join(relative))?;
+        assert_safe_write(&root.join(relative), &input)?;
     }
 
     // `--recount` makes the hunk header's line counts advisory, which removes the other routine
@@ -661,6 +679,23 @@ mod tests {
 
         assert!(err.contains("sensitive"), "unexpected error: {err}");
         assert!(file.exists(), ".env must survive a deletion patch");
+    }
+
+    #[test]
+    fn sensitive_writes_need_the_users_approval_flag() {
+        let dir = git_repo("sensitive_write_flag");
+        let file = dir.join(".env");
+        fs::write(&file, "A=1\n").unwrap();
+        let config = config_granting(&dir);
+        let input = json!({ "path": file.to_string_lossy(), "oldString": "A=1", "newString": "A=2" });
+
+        let err = update_file(&config, &input).unwrap_err();
+        assert!(err.contains("sensitive"), "unexpected error: {err}");
+
+        let mut approved = input.clone();
+        approved["allowSensitive"] = json!(true);
+        update_file(&config, &approved).expect("an approved write should go through");
+        assert_eq!(fs::read_to_string(&file).unwrap(), "A=2\n");
     }
 
     #[tokio::test]

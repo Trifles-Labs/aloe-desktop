@@ -26,7 +26,7 @@ pub fn hide_main_window(app: &AppHandle) {
 
     let should_notify = {
         let state = app.state::<AppState>();
-        let mut config = state.config.lock().expect("config mutex");
+        let mut config = state.config.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         if config.has_shown_tray_notification {
             false
         } else {
@@ -45,7 +45,7 @@ pub fn hide_main_window(app: &AppHandle) {
 }
 
 fn tray_menu<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R>> {
-    let config = app.state::<AppState>().config.lock().expect("config mutex").clone();
+    let config = app.state::<AppState>().config.lock().unwrap_or_else(std::sync::PoisonError::into_inner).clone();
     let name = config.user_profile.as_ref().map(|user| user.name.as_str()).unwrap_or("Not signed in");
     let email = config.user_profile.as_ref().map(|user| user.email.as_str()).unwrap_or("No account connected");
     let connected = config.socket_status == "connected";

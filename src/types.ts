@@ -75,7 +75,7 @@ export const DEFAULT_CONFIG: AgentConfig = {
   socketStatus: "disconnected",
   socketError: null,
   alwaysAllowCommands: false,
-  commandTrustMode: "ask",
+  commandTrustMode: "auto",
   desktopControlEnabled: false,
   runOnStartup: false,
   startMinimized: false,

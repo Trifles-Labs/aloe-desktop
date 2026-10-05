@@ -42,12 +42,12 @@ const SOFTWARE_RENDERING_ALERT_ENV: &str = "ALOE_SOFTWARE_RENDERING_ALERT";
 
 #[tauri::command]
 fn get_config(state: State<AppState>) -> AgentConfig {
-    state.config.lock().expect("config mutex").clone()
+    state.config.lock().unwrap_or_else(std::sync::PoisonError::into_inner).clone()
 }
 
 #[tauri::command]
 fn get_pending_approvals(state: State<AppState>) -> Vec<PendingApproval> {
-    state.pending.lock().expect("pending mutex").clone()
+    state.pending.lock().unwrap_or_else(std::sync::PoisonError::into_inner).clone()
 }
 
 #[tauri::command]
@@ -102,7 +102,7 @@ fn oauth_token_from_url(url: &url::Url) -> Option<DeepLinkSignIn> {
 /// window, carries the matching binding; a match consumes it so a link can't be replayed.
 fn claim_pending_sign_in(app: &AppHandle, binding_hash: &str) -> bool {
     let state = app.state::<AppState>();
-    let mut pending = state.pending_sign_in.lock().expect("pending sign-in mutex");
+    let mut pending = state.pending_sign_in.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
     let matches = pending.as_ref().is_some_and(|flow| {
         flow.started_at.elapsed() <= SIGN_IN_WINDOW && flow.binding_hash.eq_ignore_ascii_case(binding_hash)
     });
@@ -120,7 +120,7 @@ fn begin_google_sign_in(state: State<AppState>, binding_hash: String) -> Result<
     if binding_hash.len() != 64 || !binding_hash.bytes().all(|b| b.is_ascii_hexdigit()) {
         return Err("Invalid sign-in binding.".to_string());
     }
-    *state.pending_sign_in.lock().expect("pending sign-in mutex") = Some(config::PendingSignIn {
+    *state.pending_sign_in.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some(config::PendingSignIn {
         binding_hash,
         started_at: std::time::Instant::now(),
     });
@@ -142,7 +142,7 @@ fn accept_deep_link_sign_in(app: &AppHandle, sign_in: DeepLinkSignIn) {
 fn store_oauth_token(app: &AppHandle, token: String) {
     {
         let state = app.state::<AppState>();
-        let mut pending = state.pending_oauth.lock().expect("pending oauth mutex");
+        let mut pending = state.pending_oauth.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         *pending = Some(token.clone());
     }
     let _ = app.emit(OAUTH_TOKEN_EVENT, token);
@@ -175,7 +175,7 @@ fn set_run_on_startup(
             .map_err(|error| error.to_string())?;
     }
     let next = {
-        let mut config = state.config.lock().expect("config mutex");
+        let mut config = state.config.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         config.run_on_startup = enabled;
         save_config(&config)?;
         config.clone()
@@ -185,7 +185,7 @@ fn set_run_on_startup(
 
 #[tauri::command]
 fn set_start_minimized(state: State<AppState>, enabled: bool) -> Result<AgentConfig, String> {
-    let mut config = state.config.lock().expect("config mutex");
+    let mut config = state.config.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
     config.start_minimized = enabled;
     save_config(&config)?;
     Ok(config.clone())
@@ -195,7 +195,7 @@ fn set_start_minimized(state: State<AppState>, enabled: bool) -> Result<AgentCon
 
 #[tauri::command]
 fn reset_agent_connection(app: AppHandle, state: State<AppState>) -> Result<AgentConfig, String> {
-    let mut config = state.config.lock().expect("config mutex");
+    let mut config = state.config.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
     clear_agent_credentials(
         &mut config,
         "Connection reset. Paste a fresh setup token from Aloe Integrations.",
@@ -213,7 +213,7 @@ async fn register_agent(
     state: State<'_, AppState>,
     token: String,
 ) -> Result<AgentConfig, String> {
-    let config = state.config.lock().expect("config mutex").clone();
+    let config = state.config.lock().unwrap_or_else(std::sync::PoisonError::into_inner).clone();
     let setup_token = normalize_setup_token(&token);
     if setup_token.is_empty() {
         return Err("Setup token is required.".to_string());
@@ -301,7 +301,7 @@ async fn register_agent(
         ));
     }
 
-    let mut next = state.config.lock().expect("config mutex");
+    let mut next = state.config.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
     next.agent_id = Some(registered.agent_id);
     next.user_token = Some(
         registered
@@ -326,7 +326,7 @@ fn set_command_trust_mode(state: State<AppState>, mode: String) -> Result<AgentC
     if mode != "ask" && mode != "auto" && mode != "all" {
         return Err("Unsupported command trust mode.".to_string());
     }
-    let mut config = state.config.lock().expect("config mutex");
+    let mut config = state.config.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
     config.command_trust_mode = mode.clone();
     config.always_allow_commands = config.command_trust_mode == "all";
     save_config(&config)?;
@@ -337,7 +337,7 @@ fn set_command_trust_mode(state: State<AppState>, mode: String) -> Result<AgentC
     // local_agent.ts) reflects the change immediately instead of waiting for the next reconnect's
     // hello. A dropped send here just means that text lags one change behind — see
     // queue_for_approval in executor.rs for the same tradeoff on the same channel.
-    if let Some(sender) = state.outbound.lock().expect("outbound mutex").as_ref() {
+    if let Some(sender) = state.outbound.lock().unwrap_or_else(std::sync::PoisonError::into_inner).as_ref() {
         let _ = sender.send(Message::Text(json!({ "type": "trust_mode_updated", "mode": mode }).to_string().into()));
     }
 
@@ -349,7 +349,7 @@ fn set_command_trust_mode(state: State<AppState>, mode: String) -> Result<AgentC
 #[tauri::command]
 fn set_desktop_control_enabled(app: AppHandle, state: State<AppState>, enabled: bool) -> Result<AgentConfig, String> {
     let next = {
-        let mut config = state.config.lock().expect("config mutex");
+        let mut config = state.config.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         config.desktop_control_enabled = enabled;
         save_config(&config)?;
         config.clone()
@@ -376,7 +376,7 @@ fn desktop_control_overlay_active() -> bool {
 
 #[tauri::command]
 async fn sync_folders(state: State<'_, AppState>) -> Result<(), String> {
-    let config = state.config.lock().expect("config mutex").clone();
+    let config = state.config.lock().unwrap_or_else(std::sync::PoisonError::into_inner).clone();
     sync_folders_with_config(&state.client, &config).await
 }
 
@@ -390,7 +390,7 @@ async fn add_folder(app: AppHandle, state: State<'_, AppState>) -> Result<AgentC
     let canonical = std_fs::canonicalize(picked.to_string()).map_err(|e| e.to_string())?;
     debug_log("folders", "add", format!("path={}", canonical.display()));
     {
-        let mut config = state.config.lock().expect("config mutex");
+        let mut config = state.config.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         let path_str = canonical.to_string_lossy().to_string();
         if !config.folders.iter().any(|f| f.path == path_str) {
             config.folders.push(make_granted_folder(&canonical));
@@ -410,7 +410,7 @@ async fn add_folder(app: AppHandle, state: State<'_, AppState>) -> Result<AgentC
 async fn remove_folder(state: State<'_, AppState>, path: String) -> Result<AgentConfig, String> {
     debug_log("folders", "remove", format!("path={path}"));
     {
-        let mut config = state.config.lock().expect("config mutex");
+        let mut config = state.config.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         config.folders.retain(|f| f.path != path);
         save_config(&config)?;
     }
@@ -434,7 +434,7 @@ fn search_content(
     pattern: String,
     case_sensitive: bool,
 ) -> Result<Vec<SearchMatch>, String> {
-    let config = state.config.lock().expect("config mutex");
+    let config = state.config.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
     search_content_fn(&config, &path, &pattern, case_sensitive)
 }
 
@@ -445,7 +445,7 @@ fn search_files(
     pattern: String,
     case_sensitive: bool,
 ) -> Result<Vec<SearchMatch>, String> {
-    let config = state.config.lock().expect("config mutex");
+    let config = state.config.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
     search_files_fn(&config, &path, &pattern, case_sensitive)
 }
 
@@ -455,7 +455,7 @@ fn search_files(
 /// refuses anything else so the UI can't be used to probe the rest of the disk.
 #[tauri::command]
 fn project_git_branch(state: State<AppState>, path: String) -> Result<Option<String>, String> {
-    let config = state.config.lock().expect("config mutex").clone();
+    let config = state.config.lock().unwrap_or_else(std::sync::PoisonError::into_inner).clone();
     let root = fs::assert_granted(&config, &path)?;
     Ok(project::git_branch(&root))
 }
@@ -471,7 +471,7 @@ async fn add_project_folder(app: AppHandle, state: State<'_, AppState>) -> Resul
     let canonical = std_fs::canonicalize(picked.to_string()).map_err(|e| e.to_string())?;
     let path_str = canonical.to_string_lossy().to_string();
     let added = {
-        let mut config = state.config.lock().expect("config mutex");
+        let mut config = state.config.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         let added = !config.folders.iter().any(|f| f.path == path_str);
         if added {
             debug_log("folders", "add_project", format!("path={path_str}"));

@@ -123,7 +123,8 @@ pub fn make_default_config() -> AgentConfig {
             .unwrap_or_else(|_| "Aloe Desktop".to_string()),
         platform: std::env::consts::OS.to_string(),
         socket_status: "disconnected".to_string(),
-        command_trust_mode: "ask".to_string(),
+        // Auto: the LLM safety check approves safe commands and asks about the rest.
+        command_trust_mode: "auto".to_string(),
         ..Default::default()
     }
 }
@@ -160,7 +161,7 @@ pub fn load_config() -> AgentConfig {
         config.command_trust_mode = if config.always_allow_commands {
             "all"
         } else {
-            "ask"
+            "auto"
         }
         .to_string();
     } else if config.command_trust_mode == "trusted_coding" {
@@ -168,7 +169,7 @@ pub fn load_config() -> AgentConfig {
         // context — an existing config.json still on the old value reads as "auto" from here on.
         config.command_trust_mode = "auto".to_string();
     } else if !matches!(config.command_trust_mode.as_str(), "ask" | "auto" | "all") {
-        config.command_trust_mode = "ask".to_string();
+        config.command_trust_mode = "auto".to_string();
     }
     for session in &mut config.terminal_sessions {
         if session.status == "running" {
@@ -190,7 +191,11 @@ fn compact_value(v: Value) -> Value {
     const MAX_ARR: usize = 30;
     match v {
         Value::String(s) if s.len() > MAX_STR => {
-            Value::String(format!("{}…(+{} chars)", &s[..MAX_STR], s.len() - MAX_STR))
+            // Cut on a character boundary: slicing at a raw byte offset panicked whenever a
+            // multi-byte character (an em dash, a box-drawing glyph in command output) straddled
+            // it, with the config mutex held, and that crashed the app mid tool call.
+            let end = crate::fs::floor_char_boundary(&s, MAX_STR);
+            Value::String(format!("{}…(+{} bytes)", &s[..end], s.len() - end))
         }
         Value::Object(map) => Value::Object(
             map.into_iter()
@@ -336,4 +341,18 @@ pub fn secret_fingerprint(value: &str) -> String {
         .take(6)
         .map(|b| format!("{b:02x}"))
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn compacting_a_long_string_never_splits_a_character() {
+        // "—" is three bytes; placed so byte 500 lands inside it.
+        let text = format!("{}—{}", "a".repeat(499), "b".repeat(100));
+        let Value::String(compacted) = compact_value(Value::String(text)) else { panic!("not a string") };
+        assert!(compacted.starts_with(&"a".repeat(499)));
+        assert!(compacted.contains("bytes)"));
+    }
 }

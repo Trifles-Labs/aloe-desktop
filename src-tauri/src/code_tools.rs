@@ -204,7 +204,7 @@ fn granted_new_path(config: &AgentConfig, raw: &str) -> Result<PathBuf, String> 
 /// `{ path, content }` → writes the whole file, creating it and any missing parent folders.
 pub fn write_text_file(config: &AgentConfig, input: &Value) -> Result<Value, String> {
     let path = granted_new_path(config, &input_string(input, "path")?)?;
-    assert_safe_write(&path)?;
+    assert_safe_write(&path, input)?;
     let content = input.get("content").and_then(Value::as_str).ok_or("content is required.")?;
     if path.is_dir() {
         return Err(format!("{} is a directory.", path.display()));

@@ -26,7 +26,7 @@ pub fn set_socket_state(app: &AppHandle, status: &str, error: Option<String>) {
     debug_log("socket", "state", format!("status={status}"));
     let state = app.state::<AppState>();
     {
-        let mut config = state.config.lock().expect("config mutex");
+        let mut config = state.config.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         config.socket_status = status.to_string();
         config.socket_error = error;
         let _ = save_config(&config);
@@ -75,7 +75,7 @@ pub async fn socket_loop(app: AppHandle) {
 
     loop {
         let state = app.state::<AppState>();
-        let config = state.config.lock().expect("config mutex").clone();
+        let config = state.config.lock().unwrap_or_else(std::sync::PoisonError::into_inner).clone();
 
         let Some(credential) = config.credential.clone() else {
             set_socket_state(&app, "disconnected", Some("Agent is not registered yet.".to_string()));
@@ -154,7 +154,7 @@ async fn run_connected_loop(
     fp: &str,
 ) {
     let (mut write, mut read) = socket.split();
-    let command_trust_mode = app.state::<AppState>().config.lock().expect("config mutex").command_trust_mode.clone();
+    let command_trust_mode = app.state::<AppState>().config.lock().unwrap_or_else(std::sync::PoisonError::into_inner).command_trust_mode.clone();
     let _ = write.send(Message::Text(json!({ "type": "hello", "commandTrustMode": command_trust_mode }).to_string().into())).await;
     let mut heartbeat = tokio::time::interval(Duration::from_millis(SOCKET_HEARTBEAT_MS));
     heartbeat.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
@@ -165,7 +165,7 @@ async fn run_connected_loop(
     // stored sender simply fails (silently, by design — see queue_for_approval) until the next
     // connection replaces it.
     let (outbound_tx, mut outbound_rx) = tokio::sync::mpsc::unbounded_channel();
-    *app.state::<AppState>().outbound.lock().expect("outbound mutex") = Some(outbound_tx);
+    *app.state::<AppState>().outbound.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some(outbound_tx);
 
     loop {
         tokio::select! {
@@ -244,7 +244,7 @@ async fn run_connected_loop(
 /// would leave it enforcing a set the user has already changed.
 fn apply_conversation_folders(app: &AppHandle, update: ConversationFoldersMessage) {
     let state = app.state::<AppState>();
-    let mut config = state.config.lock().expect("config mutex");
+    let mut config = state.config.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
     set_conversation_folders(
         &mut config,
         &update.conversation_id,
@@ -293,7 +293,7 @@ fn open_folder_picker(app: &AppHandle, request: FolderPickRequest) {
 
         // Best-effort, like every other outbound push here: if the socket dropped while the dialog
         // was open, the web request times out on its own and the user can simply ask again.
-        if let Some(sender) = app.state::<AppState>().outbound.lock().expect("outbound mutex").as_ref() {
+        if let Some(sender) = app.state::<AppState>().outbound.lock().unwrap_or_else(std::sync::PoisonError::into_inner).as_ref() {
             let _ = sender.send(Message::Text(response.to_string().into()));
         }
     });
@@ -343,7 +343,7 @@ async fn handle_offline_fallback(
     }
 
     if heartbeat.as_ref().is_ok_and(|r| r.status().as_u16() == 401) {
-        let mut cfg = state.config.lock().expect("config mutex");
+        let mut cfg = state.config.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         if cfg.credential.as_deref() == Some(credential) {
             clear_agent_credentials(&mut cfg, "Credential was rejected. Paste a new setup token.");
             let _ = save_config(&cfg);

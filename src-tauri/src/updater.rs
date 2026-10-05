@@ -39,7 +39,7 @@ pub async fn download_update(app: AppHandle) -> Result<Option<String>, String> {
     let bytes = update.download(|_, _| {}, || {}).await.map_err(|e| e.to_string())?;
     let version = update.version.clone();
     debug_log("updater", "downloaded", format!("version={version}"));
-    *app.state::<PendingUpdate>().0.lock().expect("update mutex") = Some((update, bytes));
+    *app.state::<PendingUpdate>().0.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some((update, bytes));
     Ok(Some(version))
 }
 
@@ -47,7 +47,7 @@ pub async fn download_update(app: AppHandle) -> Result<Option<String>, String> {
 /// installer is launched and the process exits.
 #[tauri::command]
 pub fn install_update(app: AppHandle) -> Result<(), String> {
-    let Some((update, bytes)) = app.state::<PendingUpdate>().0.lock().expect("update mutex").take() else {
+    let Some((update, bytes)) = app.state::<PendingUpdate>().0.lock().unwrap_or_else(std::sync::PoisonError::into_inner).take() else {
         return Err("No update has been downloaded.".into());
     };
     update.install(bytes).map_err(|e| e.to_string())?;

@@ -41,7 +41,7 @@ fn maybe_resync_folder_context(app: &AppHandle, job_kind: &str, status: &str) {
     tauri::async_runtime::spawn(async move {
         let state = app.state::<AppState>();
         let config_snapshot = {
-            let mut config = state.config.lock().expect("config mutex");
+            let mut config = state.config.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
             rescan_folder_contexts(&mut config);
             let _ = save_config(&config);
             config.clone()
@@ -164,7 +164,7 @@ pub async fn execute_job(app: AppHandle, job: AgentJob) {
     // this job came from. Resolved once here so every path check below — and every tool dispatched
     // from it — sees the same set. Never saved; see scoped_config in config.rs.
     let config = {
-        let stored = state.config.lock().expect("config mutex");
+        let stored = state.config.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         scoped_config(&stored, job.conversation_id.as_deref())
     };
 
@@ -258,7 +258,7 @@ fn record_and_emit(
     input: Option<Value>,
     output: Option<Value>,
 ) {
-    let mut config = state.config.lock().expect("config mutex");
+    let mut config = state.config.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
     add_recent(&mut config, job_id, kind, status, error.unwrap_or("Completed"), input, output);
     let _ = save_config(&config);
     drop(config);
@@ -302,7 +302,7 @@ fn queue_for_approval(state: &tauri::State<AppState>, app: &AppHandle, job: Agen
         // command that session runs so the user can tell what will interpret it.
         let session = input_string(&job.input, "sessionId")
             .ok()
-            .and_then(|id| state.terminals.lock().expect("terminal sessions mutex").get(&id).cloned());
+            .and_then(|id| state.terminals.lock().unwrap_or_else(std::sync::PoisonError::into_inner).get(&id).cloned());
         let text = input_string(&job.input, "input").unwrap_or_default();
         match session {
             Some(session) => (text, session.cwd, format!("Aloe wants to type this into the running terminal session `{}`.", session.command)),
@@ -330,7 +330,7 @@ fn queue_for_approval(state: &tauri::State<AppState>, app: &AppHandle, job: Agen
     // Mirrors this into the backend's approval queue, so it shows up in the web /app/approvals
     // page alongside email/calendar/GitHub actions — not just in this device's own panel.
     // Best-effort: if the socket isn't up right now, the row simply doesn't exist remotely yet.
-    if let Some(sender) = state.outbound.lock().expect("outbound mutex").as_ref() {
+    if let Some(sender) = state.outbound.lock().unwrap_or_else(std::sync::PoisonError::into_inner).as_ref() {
         let sync_message = json!({
             "type": "approval_requested",
             "jobId": pending.job_id.clone(),
@@ -341,7 +341,7 @@ fn queue_for_approval(state: &tauri::State<AppState>, app: &AppHandle, job: Agen
         let _ = sender.send(Message::Text(sync_message.to_string().into()));
     }
 
-    state.pending.lock().expect("pending mutex").push(pending);
+    state.pending.lock().unwrap_or_else(std::sync::PoisonError::into_inner).push(pending);
     let _ = app.emit("agent://pending-approval", ());
 }
 
@@ -352,7 +352,7 @@ fn queue_for_approval(state: &tauri::State<AppState>, app: &AppHandle, job: Agen
 pub async fn resolve_pending_approval(app: &AppHandle, job_id: &str, approved: bool) -> Result<(), String> {
     let state = app.state::<AppState>();
     let pending = {
-        let mut list = state.pending.lock().expect("pending mutex");
+        let mut list = state.pending.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         let idx = list
             .iter()
             .position(|i| i.job_id == job_id)
@@ -360,7 +360,7 @@ pub async fn resolve_pending_approval(app: &AppHandle, job_id: &str, approved: b
         list.remove(idx)
     };
     let config = {
-        let stored = state.config.lock().expect("config mutex");
+        let stored = state.config.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         scoped_config(&stored, pending.conversation_id.as_deref())
     };
 

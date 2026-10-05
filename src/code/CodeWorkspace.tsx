@@ -2,8 +2,9 @@
  *
  * It shares the chat thread UI (ChatPageClient) and the device's tools, but is
  * not a chat mode: requests carry `workspace: "code"` and the project path, and
- * the backend answers them with its own fixed model, tools and system prompt.
- * The composer drops chat's mode slider, per-chat folder sharing and @mentions.
+ * the backend answers them with its own tools and system prompt. The composer
+ * keeps chat's modes minus Auto, drops per-chat folder sharing and @mentions, and
+ * adds plan mode.
  * Every session belongs to one project folder and sessions are listed by project. */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -313,7 +314,7 @@ export default function CodeWorkspace({ config, pendingCount, onAddProject }: Pr
         </Link>
       ) : (
         <Link href="/app/settings?section=desktop" className="hidden hover:text-ink sm:inline">
-          {TRUST_LABELS[config.commandTrustMode] ?? TRUST_LABELS.ask}
+          {TRUST_LABELS[config.commandTrustMode] ?? TRUST_LABELS.auto}
         </Link>
       )}
     </div>

@@ -41,7 +41,7 @@ pub fn is_active() -> bool {
 /// fade-out back. Returns true when this call just started a run and moved Aloe's own window out of
 /// the way, so the caller can let the desktop repaint before it looks at or touches the screen.
 pub fn mark_active(app: &AppHandle) -> bool {
-    *LAST_ACTIVITY.lock().expect("overlay mutex") = Some(Instant::now());
+    *LAST_ACTIVITY.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some(Instant::now());
     let starting = !is_active();
     let cleared = starting && minimize_main_window(app);
     if let Err(error) = ensure_windows(app) {
@@ -57,7 +57,7 @@ pub fn mark_active(app: &AppHandle) -> bool {
 /// The run is over (computer_use finished): fade out now rather than after the idle timeout, and
 /// bring Aloe's window back so the user sees the reply.
 pub fn release(app: &AppHandle) {
-    *LAST_ACTIVITY.lock().expect("overlay mutex") = None;
+    *LAST_ACTIVITY.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = None;
     set_active(app, false);
 }
 
@@ -206,7 +206,7 @@ fn spawn_idle_watcher(app: &AppHandle) {
 
 fn is_idle() -> bool {
     let idle = Duration::from_secs(DESKTOP_CONTROL_OVERLAY_IDLE_SECONDS);
-    LAST_ACTIVITY.lock().expect("overlay mutex").map_or(true, |at| at.elapsed() >= idle)
+    LAST_ACTIVITY.lock().unwrap_or_else(std::sync::PoisonError::into_inner).map_or(true, |at| at.elapsed() >= idle)
 }
 
 fn ensure_windows(app: &AppHandle) -> Result<(), String> {
