@@ -39,7 +39,9 @@
             "icons/icon.icns",
             "icons/icon.ico"
         ],
-        "resources": {}
+        "resources": {
+            "resources/cua-driver/": "cua-driver/"
+        }
     },
     "plugins": {
         "deep-link": {

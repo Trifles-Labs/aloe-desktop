@@ -61,6 +61,11 @@ jobs:
         working-directory: aloe-desktop
         run: bun install --frozen-lockfile
 
+      # Desktop control's Cua Driver, bundled as a resource (src-tauri/src/cua.rs).
+      - name: Fetch Cua Driver
+        working-directory: aloe-desktop
+        run: python scripts/fetch_cua_driver.py
+
       - name: Build and release
         uses: tauri-apps/tauri-action@v0
         env:

@@ -2,6 +2,7 @@ mod browser;
 mod code_tools;
 mod computer;
 mod config;
+mod cua;
 mod cursor;
 mod desktop;
 mod executor;

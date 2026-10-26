@@ -447,7 +447,7 @@ pub async fn dispatch_tool(
 /// This job runs without command approval, so it must never be able to start a program.
 const OPENABLE_URL_SCHEMES: [&str; 4] = ["http", "https", "mailto", "tel"];
 
-fn checked_open_url(raw: &str) -> Result<String, String> {
+pub(crate) fn checked_open_url(raw: &str) -> Result<String, String> {
     let parsed = url::Url::parse(raw.trim())
         .map_err(|_| "URL must be absolute, such as https://example.com.".to_string())?;
     if !OPENABLE_URL_SCHEMES.contains(&parsed.scheme()) {

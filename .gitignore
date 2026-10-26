@@ -11,3 +11,6 @@ src-tauri/gen
 # Native voice-assistant assets, fetched via scripts/fetch-voice-assets.ps1
 src-tauri/vendor
 src-tauri/resources/vosk-model-small-en-us-0.15
+
+# Cua Driver (desktop control), fetched via scripts/fetch_cua_driver.py
+src-tauri/resources/cua-driver

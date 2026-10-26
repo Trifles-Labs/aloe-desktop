@@ -46,6 +46,12 @@ Install dependencies:
 bun install
 ```
 
+Fetch Cua Driver, which desktop control uses and the app bundles (the build fails without it):
+
+```sh
+python scripts/fetch_cua_driver.py
+```
+
 Run the desktop app in development mode:
 
 ```sh
@@ -120,6 +126,12 @@ The **Chat | Code** switch in the title bar opens Aloe Code: Aloe as a coding ag
 - Built for prompt caching: the tools and system prompt are identical on every turn, every turn since the last compaction is replayed in full (file reads included) instead of aging into a digest, and Anthropic models start on the 1-hour cache TTL, so a session re-reads its history from cache rather than at full price.
 - Where it's stored: messages live on the Aloe backend like any chat. The backend also marks the conversation as a Code session (`workspace: "code"`), which keeps it out of the chat list everywhere, including the web app. The project folder path for each session stays on this device, in `localStorage`. A session marked on the server that this device has no project for (from another computer, or after a reinstall) is listed under "No project on this computer", and you choose its project before continuing.
 - The branch is read from `.git/HEAD` rather than by running `git`, so opening a project never runs code from its repository config.
+
+## Desktop Control
+
+When the user switches on "Let Aloe control this computer", the backend's desktop agent drives apps through [Cua Driver](https://github.com/trycua/cua), bundled under `resources/cua-driver/` and pinned in `scripts/fetch_cua_driver.py`. Aloe runs one `cua-driver mcp` process (`src-tauri/src/cua.rs`) and forwards `desktop_cua` jobs to it: per-window accessibility trees, element-token clicks and typing, delivered in the background without taking the user's pointer or focus. Cua's telemetry is turned off (`DO_NOT_TRACK=1`).
+
+Aloe filters every call before it reaches the driver: only an allowlist of tools, never Aloe's own process or windows, no file writes, and `launch_app` by app name only (never an executable path or arguments). Moving the pointer into a screen corner still stops control. Set `ALOE_CUA_DRIVER` to a driver binary to develop against a different build.
 
 ## Browser Automation
 

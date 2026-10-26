@@ -568,6 +568,11 @@ def main():
         # .relr.dyn sections, so avoid stripping when AppImage is requested.
         env.setdefault("NO_STRIP", "1")
 
+    # Desktop control's Cua Driver is bundled as a resource; the build fails without it.
+    if run_command([sys.executable, str(SCRIPT_DIR / "scripts" / "fetch_cua_driver.py")]) != 0:
+        print("\nCould not fetch Cua Driver — see output above.")
+        sys.exit(1)
+
     print(f"\nBuilding Aloe Desktop v{version} for {target_platform.title()} ...\n")
     returncode = run_command(build_command(target_platform, args.linux_bundles), env=env)
     if returncode != 0:

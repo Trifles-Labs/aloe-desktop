@@ -44,7 +44,8 @@ base64 = "0.22"
 # Desktop control (computer.rs): synthetic mouse/keyboard input and primary-display capture.
 enigo = "0.2"
 xcap = "0.0.12"
-image = { version = "0.25", default-features = false, features = ["jpeg"] }
+# png: Cua Driver returns PNG screenshots, re-encoded as JPEG before they go to the model (cua.rs).
+image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }
 
 # The green pointer while Aloe is in control (cursor.rs): swaps the system cursor on Windows.
 [target.'cfg(windows)'.dependencies]

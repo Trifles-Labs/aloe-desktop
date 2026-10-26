@@ -1,5 +1,9 @@
 //! Desktop control: screenshots of the primary display, plus synthetic mouse and keyboard input.
 //!
+//! The desktop agent now drives apps through Cua Driver (`desktop_cua` jobs, cua.rs): per-window
+//! accessibility trees and background input. The grid-based `desktop_*` actions below remain for
+//! backends that still dispatch them.
+//!
 //! Every coordinate the model sends is on a 0–1000 grid over the screenshot on both axes, not in
 //! pixels: (0, 0) is the top-left corner and (1000, 1000) the bottom-right. That is the space
 //! Gemini locates things in natively whatever the image size — given pixel space it answered in
@@ -35,6 +39,7 @@ use crate::config::{
     debug_log, save_config, AppState, DESKTOP_CONTROL_FAILSAFE_PX, DESKTOP_CONTROL_SETTLE_MS, MAX_DESKTOP_TYPE_CHARS,
     SCREENSHOT_JPEG_QUALITY, SCREENSHOT_MAX_DIMENSION,
 };
+use crate::cua;
 use crate::fs::input_string;
 use crate::notifications;
 use crate::overlay;
@@ -47,9 +52,9 @@ const DISABLED_MESSAGE: &str = "Desktop control is turned off on this computer, 
 const FAILSAFE_MESSAGE: &str = "The user stopped desktop control by moving the pointer into a screen \
     corner, and it is now turned off. Stop the task, tell the user it was stopped, and wait for them \
     to turn it back on.";
-const OWN_WINDOW_MESSAGE: &str = "That point is on Aloe Desktop's own window, which Aloe cannot click. \
+pub(crate) const OWN_WINDOW_MESSAGE: &str = "That point is on Aloe Desktop's own window, which Aloe cannot click. \
     Target another app, or ask the user to do this step themselves.";
-const OWN_FOCUS_MESSAGE: &str = "Aloe Desktop's own window has keyboard focus, so typing would land \
+pub(crate) const OWN_FOCUS_MESSAGE: &str = "Aloe Desktop's own window has keyboard focus, so typing would land \
     in it. Click into the target app first.";
 
 /// Where Aloe last left the pointer. The failsafe only fires for a corner the pointer reached some
@@ -270,6 +275,7 @@ pub async fn dispatch_desktop_control(app: &AppHandle, kind: &str, input: &Value
     // Always honoured, even with control switched off: it only takes the overlay down.
     if kind == "desktop_release" {
         overlay::release(app);
+        cua::end_run(app).await;
         return Ok(json!({ "released": true }));
     }
 
@@ -285,6 +291,9 @@ pub async fn dispatch_desktop_control(app: &AppHandle, kind: &str, input: &Value
     // unlike local_desktop_screenshot, which captures whatever is on screen as-is.
     if kind == "desktop_screenshot" {
         return capture_desktop_screenshot(app).await;
+    }
+    if kind == "desktop_cua" {
+        return dispatch_cua(app, input).await;
     }
 
     let window = aloe_window(app);
@@ -324,13 +333,56 @@ pub async fn dispatch_desktop_control(app: &AppHandle, kind: &str, input: &Value
     Ok(summary)
 }
 
+/// A Cua Driver tool call. No screenshot is added afterwards: the model reads state back itself
+/// (get_window_state with `since`), which is cheaper than a full screen per step.
+async fn dispatch_cua(app: &AppHandle, input: &Value) -> Result<Value, String> {
+    let display_width = match on_input_thread(app, check_failsafe).await? {
+        Ok(width) => width,
+        Err(ControlError::Failsafe) => {
+            trip_failsafe(app);
+            return Err(FAILSAFE_MESSAGE.to_string());
+        }
+        // No input access is not fatal here: Cua Driver does its own input.
+        Err(ControlError::Failed(_)) => None,
+    };
+    let window = aloe_window(app).map(|w| cua::OwnWindow { x: w.x, y: w.y, w: w.w, h: w.h, focused: w.focused });
+
+    overlay::set_pill_interactive(app, false);
+    let result = cua::call(app, input, window, display_width).await;
+    overlay::set_pill_interactive(app, true);
+    // A foreground-delivery action can move the real pointer; where it leaves it is Aloe's doing.
+    let _ = on_input_thread(app, || {
+        if let Ok(enigo) = new_enigo() {
+            *LAST_POINTER.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = enigo.location().ok();
+        }
+    })
+    .await;
+    result
+}
+
+/// The corner failsafe on its own. Reports the primary display's width, which the Cua bridge
+/// needs to map its screenshots back onto the screen.
+fn check_failsafe() -> Result<Option<i32>, ControlError> {
+    let enigo = new_enigo()?;
+    let geometry = display_geometry(&enigo)?;
+    let pointer = enigo.location().map_err(input_error)?;
+    if user_parked_in_corner(geometry, pointer) {
+        return Err(ControlError::Failsafe);
+    }
+    Ok(Some(geometry.display_w))
+}
+
+fn user_parked_in_corner(geometry: ScreenGeometry, pointer: (i32, i32)) -> bool {
+    let left_by_aloe = *LAST_POINTER.lock().unwrap_or_else(std::sync::PoisonError::into_inner) == Some(pointer);
+    geometry.in_corner(pointer) && !left_by_aloe
+}
+
 fn perform(kind: &str, input: &Value, window: Option<AloeWindow>) -> Result<Value, ControlError> {
     let mut enigo = new_enigo()?;
     let geometry = display_geometry(&enigo)?;
 
     let pointer = enigo.location().map_err(input_error)?;
-    let left_by_aloe = *LAST_POINTER.lock().unwrap_or_else(std::sync::PoisonError::into_inner) == Some(pointer);
-    if geometry.in_corner(pointer) && !left_by_aloe {
+    if user_parked_in_corner(geometry, pointer) {
         return Err(ControlError::Failsafe);
     }
 
@@ -642,6 +694,7 @@ pub fn disable_desktop_control(app: &AppHandle) {
         let _ = save_config(&config);
     }
     overlay::close(app);
+    tauri::async_runtime::spawn(cua::shutdown());
 }
 
 fn trip_failsafe(app: &AppHandle) {
