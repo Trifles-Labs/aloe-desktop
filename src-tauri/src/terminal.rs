@@ -9,6 +9,7 @@ use tokio::{
     process::{Child, ChildStdin, Command},
     time::{sleep, Duration, Instant},
 };
+use tauri::{AppHandle, Emitter};
 use uuid::Uuid;
 
 use crate::{
@@ -30,6 +31,34 @@ pub struct TerminalSession {
     pub child: Arc<tokio::sync::Mutex<Child>>,
     pub stdin: Arc<tokio::sync::Mutex<Option<ChildStdin>>>,
     pub process_id: Option<u32>,
+    /// The conversation whose job started it, so the Aloe Code window can list a session's commands.
+    pub conversation_id: Option<String>,
+}
+
+/// Least time between two `agent://terminal-output` events for one stream. The Code window reads
+/// the output itself when poked, so the event only has to say that something arrived.
+const OUTPUT_EVENT_INTERVAL: Duration = Duration::from_millis(100);
+
+fn should_notify(last: Option<Instant>, now: Instant) -> bool {
+    last.map_or(true, |last| now.duration_since(last) >= OUTPUT_EVENT_INTERVAL)
+}
+
+/// Tells the Code window a session has new output: throttled while it streams, always at the end.
+struct OutputNotifier {
+    app: Option<AppHandle>,
+    session_id: String,
+    last: Option<Instant>,
+}
+
+impl OutputNotifier {
+    fn poke(&mut self, force: bool) {
+        let Some(app) = &self.app else { return };
+        let now = Instant::now();
+        if force || should_notify(self.last, now) {
+            self.last = Some(now);
+            let _ = app.emit("agent://terminal-output", json!({ "sessionId": self.session_id }));
+        }
+    }
 }
 
 fn append_output(buffer: &Arc<Mutex<String>>, stream: &str, text: &str) {
@@ -47,7 +76,7 @@ fn append_output(buffer: &Arc<Mutex<String>>, stream: &str, text: &str) {
     }
 }
 
-async fn pipe_output<R>(mut reader: R, buffer: Arc<Mutex<String>>, stream: &'static str)
+async fn pipe_output<R>(mut reader: R, buffer: Arc<Mutex<String>>, stream: &'static str, mut notifier: OutputNotifier)
 where
     R: tokio::io::AsyncRead + Unpin,
 {
@@ -61,13 +90,17 @@ where
                 break;
             }
         }
+        notifier.poke(false);
     }
+    notifier.poke(true);
 }
 
 pub async fn start_terminal_session(
     state: &AppState,
     config: AgentConfig,
     input: Value,
+    app: Option<&AppHandle>,
+    conversation_id: Option<String>,
 ) -> Result<Value, String> {
     let cwd = assert_granted(&config, &input_string(&input, "cwd")?)?;
     let command = input_string(&input, "command")?;
@@ -95,11 +128,12 @@ pub async fn start_terminal_session(
     let output = Arc::new(Mutex::new(String::new()));
     let child = Arc::new(tokio::sync::Mutex::new(child));
 
+    let notifier = || OutputNotifier { app: app.cloned(), session_id: session_id.clone(), last: None };
     if let Some(stdout) = stdout {
-        tokio::spawn(pipe_output(stdout, output.clone(), "stdout"));
+        tokio::spawn(pipe_output(stdout, output.clone(), "stdout", notifier()));
     }
     if let Some(stderr) = stderr {
-        tokio::spawn(pipe_output(stderr, output.clone(), "stderr"));
+        tokio::spawn(pipe_output(stderr, output.clone(), "stderr", notifier()));
     }
 
     let session = TerminalSession {
@@ -111,6 +145,7 @@ pub async fn start_terminal_session(
         child,
         stdin,
         process_id,
+        conversation_id: conversation_id.clone(),
     };
 
     state
@@ -120,9 +155,13 @@ pub async fn start_terminal_session(
         .insert(session_id.clone(), session);
     {
         let mut stored = state.config.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-        stored.terminal_sessions.insert(0, PersistedTerminalSession { session_id: session_id.clone(), command: command.clone(), cwd: cwd.to_string_lossy().to_string(), started_at: Utc::now().to_rfc3339(), status: "running".to_string(), exit_code: None });
+        stored.terminal_sessions.insert(0, PersistedTerminalSession { session_id: session_id.clone(), command: command.clone(), cwd: cwd.to_string_lossy().to_string(), started_at: Utc::now().to_rfc3339(), status: "running".to_string(), exit_code: None, conversation_id });
         stored.terminal_sessions.truncate(50);
         let _ = save_config(&stored);
+    }
+
+    if let Some(app) = app {
+        let _ = app.emit("agent://terminal-output", json!({ "sessionId": session_id }));
     }
 
     Ok(json!({
@@ -264,6 +303,7 @@ pub async fn list_terminal_sessions(state: &AppState) -> Result<Value, String> {
             "command": session.command,
             "startedAt": session.started_at.to_rfc3339(),
             "status": status,
+            "conversationId": session.conversation_id,
         }));
     }
 
@@ -271,15 +311,32 @@ pub async fn list_terminal_sessions(state: &AppState) -> Result<Value, String> {
     let stored = state.config.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
     for session in &stored.terminal_sessions {
         if !active_ids.iter().any(|id| *id == session.session_id) {
-            items.push(json!({ "sessionId": session.session_id, "cwd": session.cwd, "command": session.command, "startedAt": session.started_at, "status": { "state": session.status, "exitCode": session.exit_code } }));
+            items.push(json!({ "sessionId": session.session_id, "cwd": session.cwd, "command": session.command, "startedAt": session.started_at, "status": { "state": session.status, "exitCode": session.exit_code }, "conversationId": session.conversation_id }));
         }
     }
     Ok(json!({ "sessions": items, "commandTimeoutSeconds": COMMAND_TIMEOUT_SECONDS }))
 }
 
+/// The folder a session runs in, live or remembered, for the Code window's grant check.
+pub fn session_cwd(state: &AppState, session_id: &str) -> Option<String> {
+    if let Some(session) = state.terminals.lock().expect("terminal sessions mutex").get(session_id) {
+        return Some(session.cwd.clone());
+    }
+    let stored = state.config.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    stored.terminal_sessions.iter().find(|item| item.session_id == session_id).map(|item| item.cwd.clone())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn output_events_are_throttled_per_stream() {
+        let start = Instant::now();
+        assert!(should_notify(None, start));
+        assert!(!should_notify(Some(start), start + Duration::from_millis(40)));
+        assert!(should_notify(Some(start), start + OUTPUT_EVENT_INTERVAL));
+    }
 
     #[test]
     fn trimming_the_buffer_never_splits_a_character() {

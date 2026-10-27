@@ -102,6 +102,9 @@ pub struct PersistedTerminalSession {
     pub started_at: String,
     pub status: String,
     pub exit_code: Option<i32>,
+    /// Missing on sessions saved before Aloe Code listed them per conversation.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub conversation_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

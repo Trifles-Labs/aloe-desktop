@@ -398,6 +398,21 @@ pub async fn dispatch_tool(
     config: &AgentConfig,
     job: &AgentJob,
 ) -> Result<Value, String> {
+    // The file as it was before this write, for Aloe Code's Changes pane (changes.rs).
+    let tracked = crate::changes::before_job(config, job.conversation_id.as_deref(), &job.kind, &job.input);
+    let result = run_tool(app, state, config, job).await;
+    if let (Some(pending), Ok(_)) = (tracked, &result) {
+        crate::changes::after_job(app, pending);
+    }
+    result
+}
+
+async fn run_tool(
+    app: &AppHandle,
+    state: &tauri::State<'_, AppState>,
+    config: &AgentConfig,
+    job: &AgentJob,
+) -> Result<Value, String> {
     match job.kind.as_str() {
         "search_local_codebase"  => search_codebase(config, &job.input),
         // Aloe Code's tools (code_tools.rs).
@@ -420,7 +435,7 @@ pub async fn dispatch_tool(
         "delete_folder"          => delete_folder(config, &job.input),
         "run_command"            => run_command(config.clone(), job.input.clone()).await,
         "run_local_command"      => run_command(config.clone(), job.input.clone()).await,
-        "start_terminal_session" => start_terminal_session(state, config.clone(), job.input.clone()).await,
+        "start_terminal_session" => start_terminal_session(state, config.clone(), job.input.clone(), Some(app), job.conversation_id.clone()).await,
         "read_terminal_session"  => read_terminal_session(state, job.input.clone()).await,
         "write_terminal_session" => write_terminal_session(state, job.input.clone()).await,
         "stop_terminal_session"  => stop_terminal_session(state, job.input.clone()).await,

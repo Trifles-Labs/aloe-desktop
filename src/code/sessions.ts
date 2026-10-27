@@ -116,6 +116,33 @@ export function storeLastCodeRoute(path: string) {
   }
 }
 
+export type WorkbenchTab = "changes" | "files" | "terminal";
+
+export type WorkbenchPrefs = { open: boolean; tab: WorkbenchTab; width: number };
+
+const WORKBENCH_KEY = "aloe_code_workbench";
+export const DEFAULT_WORKBENCH: WorkbenchPrefs = { open: false, tab: "changes", width: 440 };
+
+/** How the right-hand pane was left in each project: open or not, which tab, how wide. */
+export function readWorkbenchPrefs(projectPath: string | null): WorkbenchPrefs {
+  if (!projectPath) return DEFAULT_WORKBENCH;
+  try {
+    const all = JSON.parse(window.localStorage.getItem(WORKBENCH_KEY) ?? "{}") as Record<string, Partial<WorkbenchPrefs>>;
+    return { ...DEFAULT_WORKBENCH, ...all[projectPath] };
+  } catch {
+    return DEFAULT_WORKBENCH;
+  }
+}
+
+export function storeWorkbenchPrefs(projectPath: string, prefs: WorkbenchPrefs) {
+  try {
+    const all = JSON.parse(window.localStorage.getItem(WORKBENCH_KEY) ?? "{}") as Record<string, WorkbenchPrefs>;
+    window.localStorage.setItem(WORKBENCH_KEY, JSON.stringify({ ...all, [projectPath]: prefs }));
+  } catch {
+    // Only a convenience.
+  }
+}
+
 /** Trailing segment of a path. */
 export function projectName(path: string): string {
   const parts = path.split(/[\\/]/).filter(Boolean);

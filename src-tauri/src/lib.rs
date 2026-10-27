@@ -1,4 +1,5 @@
 mod browser;
+mod changes;
 mod code_tools;
 mod computer;
 mod config;
@@ -16,6 +17,7 @@ mod shell;
 mod socket;
 mod terminal;
 mod updater;
+mod workbench;
 
 use serde_json::json;
 use std::{collections::HashMap, fs as std_fs, sync::Mutex};
@@ -461,6 +463,73 @@ fn project_git_branch(state: State<AppState>, path: String) -> Result<Option<Str
     Ok(project::git_branch(&root))
 }
 
+/// The device's own grants, which is what every Aloe Code pane command checks paths against.
+fn device_config(state: &AppState) -> AgentConfig {
+    state.config.lock().unwrap_or_else(std::sync::PoisonError::into_inner).clone()
+}
+
+/// Files Aloe changed in one session under one project, with their original and current text.
+#[tauri::command]
+fn code_session_changes(state: State<AppState>, conversation_id: String, project_path: String) -> Result<serde_json::Value, String> {
+    changes::session_changes(&device_config(&state), &conversation_id, &project_path)
+}
+
+/// Puts one file back the way it was before the session first changed it.
+#[tauri::command]
+fn code_revert_file(state: State<AppState>, conversation_id: String, path: String) -> Result<(), String> {
+    changes::revert_file(&device_config(&state), &conversation_id, &path)
+}
+
+fn assert_terminal_granted(state: &AppState, session_id: &str) -> Result<(), String> {
+    let cwd = terminal::session_cwd(state, session_id).ok_or_else(|| format!("Terminal session not found: {session_id}"))?;
+    fs::assert_granted(&device_config(state), &cwd).map(|_| ())
+}
+
+/// The commands a session ran, newest first, limited to ones that ran inside a granted folder.
+#[tauri::command]
+async fn code_terminal_sessions(state: State<'_, AppState>, conversation_id: String) -> Result<serde_json::Value, String> {
+    let config = device_config(&state);
+    let listed = terminal::list_terminal_sessions(&state).await?;
+    let mut sessions: Vec<serde_json::Value> = listed["sessions"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|session| session["conversationId"].as_str() == Some(conversation_id.as_str()))
+        .filter(|session| session["cwd"].as_str().is_some_and(|cwd| fs::assert_granted(&config, cwd).is_ok()))
+        .collect();
+    sessions.sort_by(|a, b| b["startedAt"].as_str().cmp(&a["startedAt"].as_str()));
+    Ok(json!({ "sessions": sessions }))
+}
+
+/// A session's whole retained output (the buffer is capped, so this stays small) and its status.
+#[tauri::command]
+async fn code_terminal_read(state: State<'_, AppState>, session_id: String) -> Result<serde_json::Value, String> {
+    assert_terminal_granted(&state, &session_id)?;
+    terminal::read_terminal_session(&state, json!({ "sessionId": session_id, "cursor": 0, "maxBytes": config::MAX_TERMINAL_BUFFER_BYTES })).await
+}
+
+#[tauri::command]
+async fn code_terminal_stop(state: State<'_, AppState>, session_id: String) -> Result<serde_json::Value, String> {
+    assert_terminal_granted(&state, &session_id)?;
+    terminal::stop_terminal_session(&state, json!({ "sessionId": session_id })).await
+}
+
+#[tauri::command]
+fn code_list_dir(state: State<AppState>, path: String) -> Result<serde_json::Value, String> {
+    workbench::list_dir(&device_config(&state), &path)
+}
+
+#[tauri::command]
+fn code_read_file(state: State<AppState>, path: String) -> Result<String, String> {
+    workbench::read_text(&device_config(&state), &path)
+}
+
+#[tauri::command]
+fn code_write_file(state: State<AppState>, path: String, content: String) -> Result<(), String> {
+    workbench::write_text(&device_config(&state), &path, &content)
+}
+
 /// "Add project" in Aloe Code. A project is a granted folder like any other — it shows up under
 /// Folder access and is removed there — but unlike `add_folder` this answers with the path the user
 /// picked, including when it was already granted, so the workspace can select it.
@@ -571,6 +640,14 @@ pub fn run() {
             search_files,
             project_git_branch,
             add_project_folder,
+            code_session_changes,
+            code_revert_file,
+            code_terminal_sessions,
+            code_terminal_read,
+            code_terminal_stop,
+            code_list_dir,
+            code_read_file,
+            code_write_file,
             updater::download_update,
             updater::install_update,
         ])
