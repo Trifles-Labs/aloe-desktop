@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- Merged into the bundle's Info.plist by Tauri. macOS kills an app that opens the microphone
+     without a usage description, and the composer's mic (aloe-ui) does exactly that. -->
+<plist version="1.0">
+<dict>
+    <key>NSMicrophoneUsageDescription</key>
+    <string>Aloe listens when you press the mic so you can talk to it instead of typing.</string>
+</dict>
+</plist>
