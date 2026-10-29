@@ -41,6 +41,15 @@ pub struct AgentConfig {
     /// Lets Aloe move the mouse and type on this computer (computer.rs). Off unless the user turns
     /// it on, and switched back off by the corner failsafe.
     pub desktop_control_enabled: bool,
+    /// Hold Left Ctrl + Left Alt to talk to Aloe (voice/). On unless the user turns it off; a
+    /// config.json saved before this field existed reads as on, not as the struct's `false`.
+    #[serde(default = "default_true")]
+    pub voice_enabled: bool,
+    /// The one conversation every push-to-talk turn joins. Minted here as a client id on first use;
+    /// the backend creates the conversation under it and answers to it from then on.
+    pub voice_conversation_id: Option<String>,
+    /// How voice sounds and looks. Missing from older config.json files, which get the defaults.
+    pub voice: VoicePrefs,
     pub run_on_startup: bool,
     pub start_minimized: bool,
     pub has_shown_tray_notification: bool,
@@ -51,6 +60,68 @@ pub struct AgentConfig {
     pub conversation_folders: Vec<ConversationFolder>,
     pub recent_actions: Vec<RecentAction>,
     pub terminal_sessions: Vec<PersistedTerminalSession>,
+}
+
+fn default_true() -> bool {
+    true
+}
+
+/// Push-to-talk preferences (Settings › Desktop app › Voice). The defaults suit someone who
+/// can't see the screen well: everything spoken, with sound cues, and no need to hold keys.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(default, rename_all = "camelCase")]
+pub struct VoicePrefs {
+    /// Read Aloe's replies and progress aloud. Questions and approvals are always spoken.
+    pub read_aloud: bool,
+    /// "slow", "normal" or "fast".
+    pub pace: String,
+    /// Short tones for listening, thinking, your turn, error.
+    pub sound_cues: bool,
+    /// 0–1.
+    pub cue_volume: f32,
+    /// A quick tap of the chord starts listening, and listening ends by itself when you stop.
+    pub tap_to_talk: bool,
+    /// After Aloe asks something, listen for the answer without a key press.
+    pub follow_ups: bool,
+    /// "s", "m", "l" or "xl".
+    pub text_size: String,
+    pub high_contrast: bool,
+    /// "short" (6s), "long" (20s) or "until_dismissed".
+    pub linger: String,
+}
+
+impl Default for VoicePrefs {
+    fn default() -> Self {
+        Self {
+            read_aloud: true,
+            pace: "normal".to_string(),
+            sound_cues: true,
+            cue_volume: 0.6,
+            tap_to_talk: true,
+            follow_ups: true,
+            text_size: "l".to_string(),
+            high_contrast: false,
+            linger: "long".to_string(),
+        }
+    }
+}
+
+impl VoicePrefs {
+    /// Coerces anything unknown (a hand-edited config.json) back to a default.
+    pub fn normalized(mut self) -> Self {
+        let defaults = VoicePrefs::default();
+        if !matches!(self.pace.as_str(), "slow" | "normal" | "fast") {
+            self.pace = defaults.pace;
+        }
+        if !matches!(self.text_size.as_str(), "s" | "m" | "l" | "xl") {
+            self.text_size = defaults.text_size;
+        }
+        if !matches!(self.linger.as_str(), "short" | "long" | "until_dismissed") {
+            self.linger = defaults.linger;
+        }
+        self.cue_volume = if self.cue_volume.is_finite() { self.cue_volume.clamp(0.0, 1.0) } else { defaults.cue_volume };
+        self
+    }
 }
 
 /// One folder granted to one conversation. The backend is the source of truth and pushes the full

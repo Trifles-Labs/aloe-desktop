@@ -94,6 +94,7 @@ console.error = (...args) => { send(args.map((a) => a?.stack ?? (typeof a === "s
         input: {
           main: path.resolve(here, "index.html"),
           overlay: path.resolve(here, "overlay.html"),
+          voice: path.resolve(here, "voice.html"),
         },
       },
     },

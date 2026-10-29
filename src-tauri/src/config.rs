@@ -61,6 +61,22 @@ pub const DESKTOP_CONTROL_OVERLAY_IDLE_SECONDS: u64 = 30;
 pub const DESKTOP_CONTROL_FAILSAFE_PX: i32 = 3;
 pub const MAX_DESKTOP_TYPE_CHARS: usize = 4_000;
 
+// ── Push-to-talk voice ───────────────────────────────────────────────────────
+/// How long Left Ctrl + Left Alt must be held, with nothing else pressed, before Aloe listens.
+/// Ordinary Ctrl+Alt+<key> shortcuts press their third key well inside this, so they never start it.
+pub const VOICE_ARM_MS: u64 = 200;
+/// Longest single recording; the hold is treated as released after this.
+pub const VOICE_MAX_SECONDS: u64 = 120;
+/// How long to wait, after release, for the transcriber's final text.
+pub const VOICE_FINAL_TIMEOUT_MS: u64 = 5_000;
+/// Hands-free listening (a tap, a follow-up, an answer) ends this long after the speaker stops.
+/// Longer than the composer mic's 1.5s: people who think between phrases mustn't be cut off.
+pub const VOICE_END_SILENCE_MS: u64 = 2_000;
+/// Hands-free listening gives up if nobody starts talking within this.
+pub const VOICE_NO_SPEECH_MS: u64 = 8_000;
+/// Longest text sent to the speech endpoint in one request (the backend's own cap).
+pub const VOICE_MAX_SPEAK_CHARS: usize = 1_000;
+
 // ── Persisted history ────────────────────────────────────────────────────────
 /// Recent actions and terminal sessions retained in config.json.
 pub const MAX_PERSISTED_HISTORY: usize = 50;
@@ -125,6 +141,7 @@ pub fn make_default_config() -> AgentConfig {
         socket_status: "disconnected".to_string(),
         // Auto: the LLM safety check approves safe commands and asks about the rest.
         command_trust_mode: "auto".to_string(),
+        voice_enabled: true,
         ..Default::default()
     }
 }
@@ -171,6 +188,7 @@ pub fn load_config() -> AgentConfig {
     } else if !matches!(config.command_trust_mode.as_str(), "ask" | "auto" | "all") {
         config.command_trust_mode = "auto".to_string();
     }
+    config.voice = config.voice.clone().normalized();
     for session in &mut config.terminal_sessions {
         if session.status == "running" {
             session.status = "interrupted".to_string();

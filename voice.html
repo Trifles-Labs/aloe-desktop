@@ -1,0 +1,172 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Aloe is listening</title>
+    <style>
+      /* Two windows load this page (see voice/overlay.rs): a click-through glow over the whole
+         display the pointer is on, and the panel at its bottom centre. Each shows only its own
+         part. Both are excluded from Aloe's own screenshots. */
+      :root {
+        --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
+        --ease-in-out: cubic-bezier(0.77, 0, 0.175, 1);
+        --glow: 123 189 150; /* --moss, dark theme */
+        --moss-deep: 47 107 79; /* --moss, light theme */
+        --cream: #f4f7f0;
+        --cream-soft: rgb(244 247 240 / 0.62);
+        --gold: #e2c48a;
+        --level: 0;
+        /* Text size from the voice preferences; voice/overlay.rs grows the panel by the same factor. */
+        --scale: 1;
+        color-scheme: dark;
+      }
+      [data-size="s"] { --scale: 0.9; }
+      [data-size="l"] { --scale: 1.25; }
+      [data-size="xl"] { --scale: 1.55; }
+      html, body { margin: 0; height: 100%; background: transparent; overflow: hidden; }
+      body { font: 400 14px/1.5 "Instrument Sans Variable", system-ui, -apple-system, "Segoe UI", sans-serif; }
+
+      .glow, .panel {
+        opacity: 0;
+        transition: opacity 250ms var(--ease-out), transform 250ms var(--ease-out);
+      }
+      #root:not([data-phase="idle"]) .glow, #root:not([data-phase="idle"]) .panel { opacity: 1; }
+      html[data-part="glow"] .panel, html[data-part="panel"] .glow { display: none; }
+
+      /* The edge glow, as in the desktop-control overlay. While listening its outer bloom follows
+         the voice; thinking, it breathes; speaking, it settles. Only opacity changes per frame. */
+      .glow { position: fixed; inset: 0; pointer-events: none; }
+      .glow::before, .glow::after { content: ""; position: absolute; inset: 0; }
+      .glow::before {
+        box-shadow:
+          inset 0 0 0 3px rgb(var(--glow)),
+          inset 0 0 0 4px rgb(var(--moss-deep) / 0.6),
+          inset 0 0 40px 8px rgb(var(--glow) / 0.45);
+      }
+      .glow::after {
+        box-shadow: inset 0 0 120px 30px rgb(var(--glow) / 0.6);
+        opacity: 0.25;
+        transition: opacity 90ms linear;
+      }
+      [data-phase="listening"] .glow::after { opacity: calc(0.25 + var(--level) * 0.75); }
+      [data-phase="transcribing"] .glow::after,
+      [data-phase="thinking"] .glow::after { animation: breathe 1.4s var(--ease-in-out) infinite alternate; }
+      [data-phase="speaking"] .glow::after { opacity: 0.45; }
+      [data-phase="done"] .glow::before, [data-phase="error"] .glow::before { opacity: 0.35; transition: opacity 600ms var(--ease-out); }
+      [data-phase="done"] .glow::after, [data-phase="error"] .glow::after { opacity: 0; }
+      @keyframes breathe { from { opacity: 0.2; } to { opacity: 0.9; } }
+
+      /* Rises a little on the way in and sinks the same way out. */
+      .panel {
+        position: fixed; inset: 0;
+        display: flex; flex-direction: column; gap: 10px;
+        box-sizing: border-box;
+        padding: 14px 16px 14px 18px;
+        border-radius: 20px;
+        background: rgb(15 21 18 / 0.92);
+        box-shadow: inset 0 0 0 1px rgb(var(--glow) / 0.4);
+        color: var(--cream);
+        transform: translateY(8px);
+        user-select: none;
+        -webkit-user-select: none;
+      }
+      #root:not([data-phase="idle"]) .panel { transform: translateY(0); }
+
+      .head { display: flex; align-items: center; gap: 10px; flex: none; }
+      .dot {
+        width: 8px; height: 8px; flex: none; border-radius: 999px;
+        background: rgb(var(--glow));
+        transform: scale(calc(1 + var(--level) * 0.9));
+        transition: transform 90ms linear;
+      }
+      [data-phase="thinking"] .dot, [data-phase="transcribing"] .dot { animation: breathe-dot 1.4s var(--ease-in-out) infinite alternate; }
+      [data-phase="error"] .dot { background: var(--gold); }
+      @keyframes breathe-dot { from { opacity: 0.4; } to { opacity: 1; } }
+      .label { flex: 1; min-width: 0; font-weight: 500; font-size: calc(13px * var(--scale)); color: var(--cream-soft); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+      .close {
+        flex: none; width: 28px; height: 28px; padding: 0;
+        display: grid; place-items: center;
+        border: 0; border-radius: 999px;
+        background: rgb(244 247 240 / 0.1); color: var(--cream);
+        font: inherit; font-size: 15px; line-height: 1; cursor: pointer;
+        transition: background-color 150ms ease, transform 120ms var(--ease-out);
+      }
+      .close:active { transform: scale(0.95); }
+      .close:focus-visible { outline: 2px solid rgb(var(--glow)); outline-offset: 2px; }
+      @media (hover: hover) and (pointer: fine) { .close:hover { background: rgb(244 247 240 / 0.18); } }
+
+      /* Newest text at the bottom; older lines fade out under the header rather than scroll. */
+      .body {
+        flex: 1; min-height: 0;
+        display: flex; flex-direction: column; justify-content: flex-end; gap: 8px;
+        overflow: hidden;
+        -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 28px);
+        mask-image: linear-gradient(to bottom, transparent 0, #000 28px);
+      }
+      .said, .reply { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+      .said { font-size: calc(15px * var(--scale)); color: var(--cream); }
+      .said:empty::before { content: "…"; color: var(--cream-soft); }
+      .reply { font-size: calc(15px * var(--scale)); color: var(--cream); }
+      .reply:empty { display: none; }
+      /* Once Aloe answers, what you said steps back. */
+      #root:not([data-phase="listening"]):not([data-phase="transcribing"]):not([data-phase="asking"]) .said { color: var(--cream-soft); font-size: calc(13px * var(--scale)); }
+      .status, .error { flex: none; margin: 0; font-size: calc(12px * var(--scale)); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+      .status { color: var(--cream-soft); }
+      .error { color: var(--gold); }
+      .status:empty, .error:empty { display: none; }
+
+      /* Waiting for a spoken answer: the question, big, with numbered choices and what to say. */
+      .ask { display: none; flex: none; margin: 0; }
+      [data-phase="asking"] .ask { display: block; }
+      [data-phase="asking"] .reply { display: none; }
+      .ask-text { margin: 0; font-size: calc(17px * var(--scale)); font-weight: 600; line-height: 1.35; white-space: pre-wrap; overflow-wrap: anywhere; }
+      .ask-options { margin: 8px 0 0; padding-left: 1.6em; font-size: calc(16px * var(--scale)); line-height: 1.45; }
+      .ask-options:empty { display: none; }
+      .ask-hint { margin: 8px 0 0; font-size: calc(13px * var(--scale)); color: rgb(var(--glow)); font-weight: 600; }
+
+      /* High contrast: solid black, white text, a thick yellow edge; nothing translucent. */
+      [data-contrast="high"] {
+        --cream: #ffffff;
+        --cream-soft: #e8e8e8;
+        --gold: #ffd400;
+        --glow: 255 212 0;
+        --moss-deep: 0 0 0;
+      }
+      [data-contrast="high"] .panel { background: #000; box-shadow: inset 0 0 0 3px #ffd400; }
+      [data-contrast="high"] .body { -webkit-mask-image: none; mask-image: none; }
+      [data-contrast="high"] .close { background: #000; box-shadow: inset 0 0 0 2px #fff; }
+      [data-contrast="high"] .close:focus-visible { outline: 3px solid #ffd400; }
+
+      @media (prefers-reduced-motion: reduce) {
+        .panel, #root:not([data-phase="idle"]) .panel { transform: none; }
+        .glow::after, .dot { animation: none !important; transition: none; }
+        .dot { transform: none; }
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root" data-phase="idle">
+      <div class="glow" aria-hidden="true"></div>
+      <div class="panel" role="status" aria-live="polite">
+        <div class="head">
+          <span class="dot" aria-hidden="true"></span>
+          <span class="label" id="label">Listening…</span>
+          <button type="button" class="close" id="close" aria-label="Close">✕</button>
+        </div>
+        <div class="ask" id="ask">
+          <p class="ask-text" id="ask-text"></p>
+          <ol class="ask-options" id="ask-options"></ol>
+          <p class="ask-hint" id="ask-hint"></p>
+        </div>
+        <div class="body" id="body">
+          <p class="said" id="said"></p>
+          <p class="reply" id="reply"></p>
+        </div>
+        <p class="status" id="status"></p>
+        <p class="error" id="error"></p>
+      </div>
+    </div>
+    <script type="module" src="/src/voice-overlay.ts"></script>
+  </body>
+</html>

@@ -17,6 +17,7 @@ import { ConnectionPanel } from "../components/ConnectionPanel";
 import { ControlGroup, ControlRow } from "../components/ControlGroup";
 import { DesktopControlPanel } from "../components/DesktopControlPanel";
 import { FoldersPanel } from "../components/FoldersPanel";
+import { VoicePanel } from "../components/VoicePanel";
 import type { AgentConfig } from "../types";
 import { useDesktopControls } from "./DesktopControlsContext";
 
@@ -99,6 +100,7 @@ export default function DesktopAppPane() {
       <FoldersPanel folders={config.folders} conversationFolders={config.conversationFolders} onAdd={onAddFolder} onRemove={onRemoveFolder} />
       <ApprovalsPanel config={config} pending={pending} onRefresh={onRefresh} onSetCommandTrustMode={onSetCommandTrustMode} />
       <DesktopControlPanel enabled={config.desktopControlEnabled} onSetEnabled={onSetDesktopControl} />
+      <VoicePanel config={config} setConfig={setConfig} />
       <ActivityList actions={config.recentActions} />
     </>
   );

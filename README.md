@@ -133,6 +133,17 @@ When the user switches on "Let Aloe control this computer", the backend's deskto
 
 Aloe filters every call before it reaches the driver: only an allowlist of tools, never Aloe's own process or windows, no file writes, and `launch_app` by app name only (never an executable path or arguments). Moving the pointer into a screen corner still stops control. Set `ALOE_CUA_DRIVER` to a driver binary to develop against a different build.
 
+## Voice (push to talk)
+
+Hold **Left Ctrl + Left Alt** (Left Control + Left Option on macOS) anywhere, talk, and let go. A glow around the screen and a panel at the bottom show your words as they are heard; Aloe's answer streams into the same panel and is read aloud. It is on by default and can be switched off under **Settings › Desktop app › Voice**.
+
+- **The chord.** It must be held for 200 ms with nothing else pressed, so ordinary Ctrl+Alt shortcuts never trigger it. Pressing another key mid-hold discards the recording. AltGr (Left Ctrl + Right Alt) never matches, and Aloe's own synthetic typing is ignored. A quick tap stops Aloe talking; holding again interrupts the reply and stops that turn on the backend.
+- **Where the words go.** Each turn joins one standing conversation (`voiceConversationId` in config.json), sent as a desktop chat with `X-Aloe-Agent`, so it has the same local tools, folder grants and command approvals as a chat typed in this app.
+- **Speech to text.** The microphone is captured in Rust (`src-tauri/src/voice/audio.rs`) and streamed straight to OpenAI's realtime transcriber (`gpt-live-transcribe`), authenticated with a one-minute ephemeral key from `POST /api/voice/live-session`. The OpenAI key itself lives only on the backend (`OPENAI_API_KEY`); the backend never receives or stores the audio.
+- **Text to speech.** Each finished sentence of the reply is fetched from `POST /api/voice/speak` (OpenAI TTS, 24 kHz PCM) and played in order.
+- **The overlay** (`voice.html`, `src-tauri/src/voice/overlay.rs`) never takes keyboard focus and is excluded from Aloe's own screenshots, like the desktop-control overlay.
+- **Platforms.** Windows uses a low-level keyboard hook, which only observes; when the chord is released it taps an unassigned key so the app in front doesn't open its menu bar. macOS uses a listen-only event tap, which needs **Input Monitoring** permission (System Settings › Privacy & Security); the Settings pane says when it is missing. Linux isn't supported yet.
+
 ## Browser Automation
 
 Aloe drives Chrome (or Chromium/Edge) through the DevTools Protocol on `127.0.0.1:9333`. If something is already listening there, Aloe attaches to it; otherwise it launches the browser itself.

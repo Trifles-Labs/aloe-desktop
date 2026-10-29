@@ -17,6 +17,7 @@ mod shell;
 mod socket;
 mod terminal;
 mod updater;
+mod voice;
 mod workbench;
 
 use serde_json::json;
@@ -375,6 +376,50 @@ fn desktop_control_overlay_active() -> bool {
     overlay::is_active()
 }
 
+// ── Push-to-talk voice ────────────────────────────────────────────────────────
+
+/// The keyboard watcher stays installed either way; switched off, its chord is simply ignored.
+#[tauri::command]
+fn set_voice_enabled(state: State<AppState>, enabled: bool) -> Result<AgentConfig, String> {
+    let next = {
+        let mut config = state.config.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        config.voice_enabled = enabled;
+        save_config(&config)?;
+        config.clone()
+    };
+    if !enabled {
+        voice::dismiss();
+    }
+    Ok(next)
+}
+
+/// Everything under Settings › Voice except the on/off switch.
+#[tauri::command]
+fn set_voice_prefs(state: State<AppState>, prefs: models::VoicePrefs) -> Result<AgentConfig, String> {
+    let mut config = state.config.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    config.voice = prefs.normalized();
+    save_config(&config)?;
+    Ok(config.clone())
+}
+
+/// The voice panel's close button.
+#[tauri::command]
+fn voice_stop() {
+    voice::dismiss();
+}
+
+/// What a freshly loaded voice overlay page should show.
+#[tauri::command]
+fn voice_overlay_state() -> voice::overlay::View {
+    voice::overlay::current()
+}
+
+/// False on macOS until Input Monitoring is allowed (and always off Windows and macOS).
+#[tauri::command]
+fn voice_hotkey_allowed() -> bool {
+    voice::hotkey::hotkey_allowed()
+}
+
 // ── Folder management ─────────────────────────────────────────────────────────
 
 #[tauri::command]
@@ -632,6 +677,11 @@ pub fn run() {
             set_desktop_control_enabled,
             stop_desktop_control,
             desktop_control_overlay_active,
+            set_voice_enabled,
+            set_voice_prefs,
+            voice_stop,
+            voice_overlay_state,
+            voice_hotkey_allowed,
             sync_folders,
             add_folder,
             remove_folder,
@@ -711,6 +761,7 @@ pub fn run() {
             tauri::async_runtime::spawn(async move {
                 socket::socket_loop(handle).await;
             });
+            voice::start(app.handle());
             Ok(())
         })
         .on_menu_event(|app, event| desktop::handle_menu_event(app, event.id().as_ref()))

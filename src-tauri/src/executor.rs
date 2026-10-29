@@ -341,6 +341,8 @@ fn queue_for_approval(state: &tauri::State<AppState>, app: &AppHandle, job: Agen
         let _ = sender.send(Message::Text(sync_message.to_string().into()));
     }
 
+    // During a voice reply the approval is read out and decided by voice (voice/prompts.rs).
+    crate::voice::approval_queued(&pending);
     state.pending.lock().unwrap_or_else(std::sync::PoisonError::into_inner).push(pending);
     let _ = app.emit("agent://pending-approval", ());
 }

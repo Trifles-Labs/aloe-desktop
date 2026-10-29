@@ -46,10 +46,13 @@ enigo = "0.2"
 xcap = "0.0.12"
 # png: Cua Driver returns PNG screenshots, re-encoded as JPEG before they go to the model (cua.rs).
 image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }
+# Push-to-talk voice (voice/): microphone capture and playback of Aloe's spoken reply.
+cpal = "0.18"
 
 # The green pointer while Aloe is in control (cursor.rs): swaps the system cursor on Windows.
+# Also the push-to-talk keyboard hook (voice/hotkey.rs).
 [target.'cfg(windows)'.dependencies]
-windows-sys = { version = "0.59", features = ["Win32_Foundation", "Win32_Graphics_Gdi", "Win32_UI_WindowsAndMessaging"] }
+windows-sys = { version = "0.59", features = ["Win32_Foundation", "Win32_Graphics_Gdi", "Win32_UI_WindowsAndMessaging", "Win32_UI_Input_KeyboardAndMouse", "Win32_System_LibraryLoader", "Win32_System_Threading"] }
 
 # Reduced debug info to keep dev-build artifacts smaller (this machine runs low on disk
 # during iterative `tauri dev` rebuilds).

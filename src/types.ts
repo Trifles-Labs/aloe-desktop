@@ -38,12 +38,40 @@ export type AgentConfig = {
   alwaysAllowCommands: boolean;
   commandTrustMode: CommandTrustMode;
   desktopControlEnabled: boolean;
+  voiceEnabled: boolean;
+  voiceConversationId: string | null;
+  voice: VoicePrefs;
   runOnStartup: boolean;
   startMinimized: boolean;
   folders: GrantedFolder[];
   conversationFolders: ConversationFolder[];
   recentActions: RecentAction[];
   terminalSessions: Array<{ sessionId: string; command: string; cwd: string; startedAt: string; status: string; exitCode: number | null }>;
+};
+
+/** Mirrors VoicePrefs in src-tauri/src/models.rs. */
+export type VoicePrefs = {
+  readAloud: boolean;
+  pace: "slow" | "normal" | "fast";
+  soundCues: boolean;
+  cueVolume: number;
+  tapToTalk: boolean;
+  followUps: boolean;
+  textSize: "s" | "m" | "l" | "xl";
+  highContrast: boolean;
+  linger: "short" | "long" | "until_dismissed";
+};
+
+export const DEFAULT_VOICE_PREFS: VoicePrefs = {
+  readAloud: true,
+  pace: "normal",
+  soundCues: true,
+  cueVolume: 0.6,
+  tapToTalk: true,
+  followUps: true,
+  textSize: "l",
+  highContrast: false,
+  linger: "long",
 };
 
 export type PendingApproval = {
@@ -77,6 +105,9 @@ export const DEFAULT_CONFIG: AgentConfig = {
   alwaysAllowCommands: false,
   commandTrustMode: "auto",
   desktopControlEnabled: false,
+  voiceEnabled: true,
+  voiceConversationId: null,
+  voice: DEFAULT_VOICE_PREFS,
   runOnStartup: false,
   startMinimized: false,
   folders: [],
