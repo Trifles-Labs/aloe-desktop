@@ -362,7 +362,9 @@ fn driver_path(app: &AppHandle) -> Result<PathBuf, String> {
 async fn start(app: &AppHandle) -> Result<Driver, String> {
     let path = driver_path(app)?;
     let mut command = Command::new(&path);
-    command.arg("mcp");
+    // Aloe never shows Cua's own agent-cursor overlay: the desktop-control glow and pill are the
+    // only indicator, and a second pointer was confused with the user's real one.
+    command.arg("mcp").arg("--no-overlay");
     // Bare `mcp` on macOS proxies to a separately installed CuaDriver.app; --direct keeps the
     // runtime in this child, so Accessibility and Screen Recording are Aloe Desktop's grants.
     if cfg!(target_os = "macos") {
