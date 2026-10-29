@@ -51,12 +51,28 @@ impl Backend {
         }
     }
 
+    /// Uploads one user attachment, returning the id to send with the next chat turn.
+    pub async fn upload_attachment(&self, bytes: Vec<u8>, filename: &str, mime_type: &str) -> Result<String, String> {
+        let part = reqwest::multipart::Part::bytes(bytes)
+            .file_name(filename.to_string())
+            .mime_str(mime_type)
+            .map_err(|e| format!("Couldn't prepare the attachment: {e}"))?;
+        let form = reqwest::multipart::Form::new().part("file", part);
+        let response = self.post("/api/chat/attachments").multipart(form).send().await.map_err(network)?;
+        let body: Value = ok_json(response, "Couldn't attach the screenshot").await?;
+        body.get("id").and_then(Value::as_str).map(str::to_string).ok_or_else(|| "Couldn't attach the screenshot: no id in the reply.".to_string())
+    }
+
     /// Sends a chat turn. The caller reads the event stream off the response.
-    pub async fn chat(&self, conversation_id: &str, message: &str) -> Result<Response, String> {
+    pub async fn chat(&self, conversation_id: &str, message: &str, attachment_ids: &[String]) -> Result<Response, String> {
+        let mut body = json!({ "message": message, "conversationId": conversation_id, "origin": "desktop_voice" });
+        if !attachment_ids.is_empty() {
+            body["attachmentIds"] = json!(attachment_ids);
+        }
         let response = self
             .post("/api/chat")
             .header("X-Aloe-Agent", &self.credential)
-            .json(&json!({ "message": message, "conversationId": conversation_id, "origin": "desktop_voice" }))
+            .json(&body)
             .send()
             .await
             .map_err(network)?;

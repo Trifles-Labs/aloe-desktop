@@ -5,8 +5,10 @@
 //!    opens at once and realtime.rs streams it to OpenAI's live transcriber through a short-lived
 //!    key from the backend. The overlay glows and shows the words as they are heard.
 //! 2. What was said goes to Aloe as a chat turn from this device, in one standing conversation, so
-//!    it has the same local tools as a chat typed here. A few short phrases are handled here
-//!    instead ("say that again", "stop", "slower": prompts.rs `local_command`).
+//!    it has the same local tools as a chat typed here. The screen as it was when listening began
+//!    is attached to that turn, so Aloe can see whatever the person is talking about. A few short
+//!    phrases are handled here instead ("say that again", "stop", "slower": prompts.rs
+//!    `local_command`).
 //! 3. The reply streams into the overlay and out of the speaker (speaker.rs), a sentence at a time.
 //! 4. When the turn stops for the user (a question, an email to approve, a command to allow),
 //!    the prompt is read out and answered by voice (prompts.rs). If the reply ends by asking
@@ -34,6 +36,7 @@ use std::{
     time::{Duration, Instant},
 };
 
+use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
 use futures_util::StreamExt;
 use serde_json::Value;
 use tauri::{async_runtime::JoinHandle, AppHandle, Manager};
@@ -42,6 +45,7 @@ use tokio::sync::{
     oneshot,
 };
 
+use crate::computer::capture_desktop_screenshot;
 use crate::config::{debug_log, save_config, AppState, VOICE_MAX_SECONDS};
 use crate::models::PendingApproval;
 use audio::{Capture, Earcon, Ended};
@@ -132,6 +136,8 @@ struct Listening {
     capture: Capture,
     transcribe: JoinHandle<Result<String, String>>,
     meter: JoinHandle<()>,
+    /// The screen at the moment this session began, for the chat turn it becomes.
+    screen: Option<JoinHandle<Option<Vec<u8>>>>,
     backend: Backend,
     purpose: Purpose,
     hands_free: bool,
@@ -307,6 +313,9 @@ fn discard(listening: Listening) {
     listening.transcribe.abort();
     listening.meter.abort();
     listening.capture.stop();
+    if let Some(screen) = listening.screen {
+        screen.abort();
+    }
     if let Purpose::Answer(answer) = listening.purpose {
         let _ = answer.send(String::new());
     }
@@ -378,6 +387,35 @@ fn backend_for(app: &AppHandle) -> Option<Backend> {
     Backend::from_config(state.client.clone(), &config)
 }
 
+/// The screen as it is right now, as JPEG bytes. Best-effort: a voice turn is still worth having
+/// without it, so every failure only reaches the debug log.
+async fn capture_screen(app: &AppHandle) -> Option<Vec<u8>> {
+    let shot = match capture_desktop_screenshot(app).await {
+        Ok(shot) => shot,
+        Err(error) => {
+            debug_log("voice", "screenshot_error", error);
+            return None;
+        }
+    };
+    let encoded = shot.get("base64").and_then(Value::as_str)?;
+    match BASE64.decode(encoded) {
+        Ok(bytes) => Some(bytes),
+        Err(error) => {
+            debug_log("voice", "screenshot_error", error.to_string());
+            None
+        }
+    }
+}
+
+/// Waits for the capture taken when listening began, but never long enough to delay the turn.
+async fn screen_bytes(screen: Option<JoinHandle<Option<Vec<u8>>>>) -> Option<Vec<u8>> {
+    let screen = screen?;
+    match tokio::time::timeout(Duration::from_secs(3), screen).await {
+        Ok(result) => result.ok().flatten(),
+        Err(_) => None,
+    }
+}
+
 /// Opens the microphone for one thing said. `hands_free` listens until the speaker stops (or never
 /// starts); otherwise until the chord is let go.
 async fn listen(app: &AppHandle, speaker: &Speaker, generation: u64, purpose: Purpose, hands_free: bool) -> Option<Listening> {
@@ -390,6 +428,12 @@ async fn listen(app: &AppHandle, speaker: &Speaker, generation: u64, purpose: Pu
         return None;
     };
     let id = LISTEN_ID.fetch_add(1, Ordering::SeqCst) + 1;
+    // Taken before the mic and the overlay: this is the screen the person was looking at when
+    // they called for Aloe, not whatever the reply has changed by the time they stop talking.
+    let screen = matches!(purpose, Purpose::Chat { follow_up: false }).then(|| {
+        let app = app.clone();
+        tauri::async_runtime::spawn(async move { capture_screen(&app).await })
+    });
 
     // Hands-free, the cue plays before the microphone opens, so the transcriber never hears it and
     // the end-of-speech detector doesn't mistake it for talking. Holding, the person is already
@@ -463,7 +507,7 @@ async fn listen(app: &AppHandle, speaker: &Speaker, generation: u64, purpose: Pu
         tokio::time::sleep(Duration::from_secs(VOICE_MAX_SECONDS)).await;
         send(Command::TimeUp(id));
     });
-    Some(Listening { id, generation, capture, transcribe, meter, backend, purpose, hands_free })
+    Some(Listening { id, generation, capture, transcribe, meter, screen, backend, purpose, hands_free })
 }
 
 /// Creates or moves the overlay windows (blocking work, so off the async threads).
@@ -474,7 +518,7 @@ async fn place_overlay(app: &AppHandle) {
 
 /// Listening is over: close the microphone, wait for the final words, and act on them.
 fn finish(app: &AppHandle, speaker: &Speaker, session: &mut Session, listening: Listening) {
-    let Listening { generation, capture, transcribe, meter, backend, purpose, .. } = listening;
+    let Listening { generation, capture, transcribe, meter, backend, purpose, screen, .. } = listening;
     meter.abort();
     overlay::level(app, 0.0);
     // Stopping the capture closes the audio channel, which is the transcriber's cue to commit.
@@ -482,6 +526,9 @@ fn finish(app: &AppHandle, speaker: &Speaker, session: &mut Session, listening: 
 
     match purpose {
         Purpose::Answer(answer) => {
+            if let Some(screen) = screen {
+                screen.abort();
+            }
             // The prompt that asked is waiting on this inside the reply task.
             update(app, generation, |view| view.status = Some("Got it…".to_string()));
             tauri::async_runtime::spawn(async move {
@@ -522,7 +569,21 @@ fn finish(app: &AppHandle, speaker: &Speaker, session: &mut Session, listening: 
                         view.phase = Phase::Thinking;
                         view.transcript = said.clone();
                     });
-                    match reply(&app, &speaker, generation, &backend, &conversation_id, &said, &finished).await {
+                    let attachment_ids = match screen_bytes(screen).await {
+                        Some(bytes) => match tokio::time::timeout(Duration::from_secs(5), backend.upload_attachment(bytes, "screen.jpg", "image/jpeg")).await {
+                            Ok(Ok(id)) => vec![id],
+                            Ok(Err(error)) => {
+                                debug_log("voice", "screenshot_upload", error);
+                                Vec::new()
+                            }
+                            Err(_) => {
+                                debug_log("voice", "screenshot_upload", "timed out");
+                                Vec::new()
+                            }
+                        },
+                        None => Vec::new(),
+                    };
+                    match reply(&app, &speaker, generation, &backend, &conversation_id, &said, &attachment_ids, &finished).await {
                         Ok(asked) => {
                             update(&app, generation, |view| {
                                 view.phase = Phase::Done;
@@ -633,10 +694,16 @@ impl Drop for PromptRoute {
 /// Spoken progress at most this often while Aloe works, so silence never means "is it stuck?".
 const PROGRESS_EVERY: Duration = Duration::from_secs(8);
 
+/// Progress lines worth reading aloud. The desktop agent's progress is narration, not an answer;
+/// the overlay still shows it, but a voice turn should stay quiet while it works.
+fn narrate_status(tool: &str, status: &str) -> bool {
+    tool != "computer_use" && !status.to_lowercase().contains("your computer")
+}
+
 /// Streams Aloe's answer into the overlay and out of the speaker, stopping for prompts along the
 /// way. Returns once everything has been said, with whether the reply ended by asking something.
-async fn reply(app: &AppHandle, speaker: &Speaker, generation: u64, backend: &Backend, conversation_id: &str, message: &str, finished: &Arc<AtomicBool>) -> Result<bool, String> {
-    let response = backend.chat(conversation_id, message).await?;
+async fn reply(app: &AppHandle, speaker: &Speaker, generation: u64, backend: &Backend, conversation_id: &str, message: &str, attachment_ids: &[String], finished: &Arc<AtomicBool>) -> Result<bool, String> {
+    let response = backend.chat(conversation_id, message, attachment_ids).await?;
     let (_route, mut queued_commands) = PromptRoute::open(generation);
     LAST_REPLY.lock().unwrap_or_else(std::sync::PoisonError::into_inner).clear();
 
@@ -684,6 +751,7 @@ async fn reply(app: &AppHandle, speaker: &Speaker, generation: u64, backend: &Ba
                     });
                 }
                 kind @ ("status" | "notice" | "tool_start") => {
+                    let tool = field("toolName");
                     if kind == "tool_start" {
                         // What Aloe said before a tool call is finished, but its last sentence has
                         // no whitespace after it yet to mark the end. Without this it waited out
@@ -696,7 +764,9 @@ async fn reply(app: &AppHandle, speaker: &Speaker, generation: u64, backend: &Ba
                     if status.is_empty() {
                         continue;
                     }
-                    if last_progress.elapsed() >= PROGRESS_EVERY && !speaker.is_busy() {
+                    // The desktop agent's progress is narration, not an answer: show it on the
+                    // overlay, but don't read it out on a voice turn.
+                    if narrate_status(&tool, &status) && last_progress.elapsed() >= PROGRESS_EVERY && !speaker.is_busy() {
                         last_progress = Instant::now();
                         speaker.say(status.trim_end_matches(['.', '…']).to_string());
                     }
@@ -805,4 +875,16 @@ async fn ask(app: &AppHandle, speaker: &Speaker, generation: u64, backend: &Back
         v.prompt = None;
         v.status = None;
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::narrate_status;
+
+    #[test]
+    fn computer_use_progress_is_not_read_aloud() {
+        assert!(!narrate_status("computer_use", "Using your computer..."));
+        assert!(!narrate_status("", "Using your computer..."));
+        assert!(narrate_status("web_search", "Searching the web..."));
+    }
 }
