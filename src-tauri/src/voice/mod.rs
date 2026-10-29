@@ -33,7 +33,7 @@ use std::{
         atomic::{AtomicBool, AtomicU64, Ordering},
         Arc, Mutex, OnceLock,
     },
-    time::{Duration, Instant},
+    time::Duration,
 };
 
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
@@ -691,15 +691,6 @@ impl Drop for PromptRoute {
     }
 }
 
-/// Spoken progress at most this often while Aloe works, so silence never means "is it stuck?".
-const PROGRESS_EVERY: Duration = Duration::from_secs(8);
-
-/// Progress lines worth reading aloud. The desktop agent's progress is narration, not an answer;
-/// the overlay still shows it, but a voice turn should stay quiet while it works.
-fn narrate_status(tool: &str, status: &str) -> bool {
-    tool != "computer_use" && !status.to_lowercase().contains("your computer")
-}
-
 /// Streams Aloe's answer into the overlay and out of the speaker, stopping for prompts along the
 /// way. Returns once everything has been said, with whether the reply ended by asking something.
 async fn reply(app: &AppHandle, speaker: &Speaker, generation: u64, backend: &Backend, conversation_id: &str, message: &str, attachment_ids: &[String], finished: &Arc<AtomicBool>) -> Result<bool, String> {
@@ -710,10 +701,7 @@ async fn reply(app: &AppHandle, speaker: &Speaker, generation: u64, backend: &Ba
     let mut stream = response.bytes_stream();
     let mut pending: Vec<u8> = Vec::new();
     let mut text = String::new();
-    let mut speech = SpeechStream::default();
     let mut deferred: Vec<Prompt> = Vec::new();
-    // So the first progress line comes a few seconds in, not at once.
-    let mut last_progress = Instant::now() - PROGRESS_EVERY + Duration::from_secs(3);
     let say = |sentence: String| {
         LAST_REPLY.lock().unwrap_or_else(std::sync::PoisonError::into_inner).push(sentence.clone());
         speaker.say(sentence);
@@ -740,9 +728,6 @@ async fn reply(app: &AppHandle, speaker: &Speaker, generation: u64, backend: &Ba
                 "text" => {
                     let content = field("content");
                     text.push_str(&content);
-                    for sentence in speech.push(&content) {
-                        say(sentence);
-                    }
                     let shown = text.clone();
                     update(app, generation, |view| {
                         view.phase = Phase::Speaking;
@@ -751,26 +736,17 @@ async fn reply(app: &AppHandle, speaker: &Speaker, generation: u64, backend: &Ba
                     });
                 }
                 kind @ ("status" | "notice" | "tool_start") => {
-                    let tool = field("toolName");
-                    if kind == "tool_start" {
-                        // What Aloe said before a tool call is finished, but its last sentence has
-                        // no whitespace after it yet to mark the end. Without this it waited out
-                        // the whole tool call and came out joined to the final answer.
-                        for sentence in speech.flush() {
-                            say(sentence);
-                        }
-                    }
                     let status = if kind == "tool_start" { field("label") } else { field("content") };
                     if status.is_empty() {
                         continue;
                     }
-                    // The desktop agent's progress is narration, not an answer: show it on the
-                    // overlay, but don't read it out on a voice turn.
-                    if narrate_status(&tool, &status) && last_progress.elapsed() >= PROGRESS_EVERY && !speaker.is_busy() {
-                        last_progress = Instant::now();
-                        speaker.say(status.trim_end_matches(['.', '…']).to_string());
-                    }
-                    update(app, generation, |view| view.status = Some(status));
+                    // Anything before a tool call or progress line was setup, not the answer.
+                    // Drop it so the speaker only ever reads the final reply.
+                    text.clear();
+                    update(app, generation, |view| {
+                        view.reply.clear();
+                        view.status = Some(status);
+                    });
                 }
                 "widget" => match event.get("widget").and_then(Prompt::from_widget) {
                     // The turn is blocked on this card until it is answered.
@@ -782,7 +758,6 @@ async fn reply(app: &AppHandle, speaker: &Speaker, generation: u64, backend: &Ba
                 // The backend restarted the answer (a model fallback); what was shown is void.
                 "reset_assistant" => {
                     text.clear();
-                    speech = SpeechStream::default();
                     update(app, generation, |view| view.reply.clear());
                 }
                 "reply_complete" | "done" => break 'stream,
@@ -791,6 +766,12 @@ async fn reply(app: &AppHandle, speaker: &Speaker, generation: u64, backend: &Ba
         }
     }
     finished.store(true, Ordering::SeqCst);
+    // Read the reply once the turn has fully settled: text emitted before a tool call or a
+    // progress line was narration, and was dropped above, so only the answer is left.
+    let mut speech = SpeechStream::default();
+    for sentence in speech.push(&text) {
+        say(sentence);
+    }
     for sentence in speech.flush() {
         say(sentence);
     }
@@ -875,16 +856,4 @@ async fn ask(app: &AppHandle, speaker: &Speaker, generation: u64, backend: &Back
         v.prompt = None;
         v.status = None;
     });
-}
-
-#[cfg(test)]
-mod tests {
-    use super::narrate_status;
-
-    #[test]
-    fn computer_use_progress_is_not_read_aloud() {
-        assert!(!narrate_status("computer_use", "Using your computer..."));
-        assert!(!narrate_status("", "Using your computer..."));
-        assert!(narrate_status("web_search", "Searching the web..."));
-    }
 }
