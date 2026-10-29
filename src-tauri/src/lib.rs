@@ -373,7 +373,7 @@ fn stop_desktop_control(app: AppHandle) {
 /// Lets a freshly created overlay window catch up on an event it was created too late to hear.
 #[tauri::command]
 fn desktop_control_overlay_active() -> bool {
-    overlay::is_active()
+    overlay::shows_own_windows()
 }
 
 // ── Push-to-talk voice ────────────────────────────────────────────────────────
@@ -402,10 +402,16 @@ fn set_voice_prefs(state: State<AppState>, prefs: models::VoicePrefs) -> Result<
     Ok(config.clone())
 }
 
-/// The voice panel's close button.
+/// Closes the voice overlay.
 #[tauri::command]
 fn voice_stop() {
     voice::dismiss();
+}
+
+/// Where the voice overlay's island is, so only it takes the cursor.
+#[tauri::command]
+fn voice_overlay_island(rect: Option<voice::overlay::Rect>) {
+    voice::overlay::set_island(rect);
 }
 
 /// What a freshly loaded voice overlay page should show.
@@ -681,6 +687,7 @@ pub fn run() {
             set_voice_prefs,
             voice_stop,
             voice_overlay_state,
+            voice_overlay_island,
             voice_hotkey_allowed,
             sync_folders,
             add_folder,

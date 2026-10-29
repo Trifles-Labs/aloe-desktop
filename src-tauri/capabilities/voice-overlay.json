@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "voice-overlay",
-  "description": "The push-to-talk overlay windows (voice/overlay.rs): render what Rust pushes in, and close.",
-  "windows": ["voice-glow", "voice-panel"],
+  "description": "The push-to-talk overlay window (voice/overlay.rs): render what Rust pushes in.",
+  "windows": ["voice-stage"],
   "permissions": ["core:event:default"]
 }

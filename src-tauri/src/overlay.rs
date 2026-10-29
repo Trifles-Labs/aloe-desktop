@@ -8,6 +8,9 @@
 //!
 //! Both windows are content-protected, which keeps them out of Aloe's own screenshots on Windows
 //! and macOS, so the model never sees (or tries to click) its own indicator.
+//!
+//! While the push-to-talk overlay is up (voice/overlay.rs), both stay faded out and its island
+//! shows the status and Stop instead, so a voice turn that drives the computer reads as one thing.
 
 use std::{
     sync::{
@@ -54,7 +57,7 @@ pub fn mark_active(app: &AppHandle) -> bool {
 }
 
 /// The run is over (computer_use finished): fade out now rather than after the idle timeout, and
-/// bring Aloe's window back so the user sees the reply.
+/// bring Aloe's window back so the user sees the reply (unless the reply is being spoken).
 pub fn release(app: &AppHandle) {
     *LAST_ACTIVITY.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = None;
     set_active(app, false);
@@ -81,26 +84,45 @@ pub fn close(app: &AppHandle) {
 /// The pill is the one clickable part. While Aloe itself clicks, it goes click-through too, so a
 /// synthetic click at the top of the screen lands on the app underneath instead of on Stop.
 pub fn set_pill_interactive(app: &AppHandle, interactive: bool) {
+    crate::voice::overlay::set_clickable(interactive);
     if let Some(pill) = app.get_webview_window(PILL_LABEL) {
-        let _ = pill.set_ignore_cursor_events(!(interactive && is_active()));
+        let _ = pill.set_ignore_cursor_events(!(interactive && shows_own_windows()));
     }
 }
 
-fn set_active(app: &AppHandle, active: bool) {
-    ACTIVE.store(active, Ordering::SeqCst);
+/// Active, and not handed to the voice island.
+pub fn shows_own_windows() -> bool {
+    is_active() && !crate::voice::overlay::is_showing()
+}
+
+/// Shows or fades the glow and pill to match: called when the run starts or ends, and by the
+/// voice overlay when it comes up or goes away.
+pub fn sync_windows(app: &AppHandle) {
+    let visible = shows_own_windows();
     // Pushed straight into each overlay page rather than as an app event: an event a page can't
     // listen for (capability scoping) left the glow up after a run ended, since the page's
     // one-time state query could turn it on but nothing could ever turn it off.
     for label in [GLOW_LABEL, PILL_LABEL] {
         if let Some(window) = app.get_webview_window(label) {
-            let _ = window.eval(&format!("window.__aloeOverlaySetActive?.({active})"));
+            let _ = window.eval(&format!("window.__aloeOverlaySetActive?.({visible})"));
         }
     }
-    let _ = app.emit(OVERLAY_EVENT, active);
+    let _ = app.emit(OVERLAY_EVENT, visible);
     // An invisible pill must not eat clicks meant for whatever is beneath it.
-    set_pill_interactive(app, active);
+    set_pill_interactive(app, true);
+}
+
+fn set_active(app: &AppHandle, active: bool) {
+    ACTIVE.store(active, Ordering::SeqCst);
+    sync_windows(app);
+    crate::voice::overlay::sync_control(app);
     if !active {
-        restore_main_window(app);
+        if crate::voice::overlay::is_showing() {
+            // Aloe is answering out loud over whatever the user is in; leave its window down.
+            MINIMIZED_FOR_RUN.store(false, Ordering::SeqCst);
+        } else {
+            restore_main_window(app);
+        }
     }
 }
 

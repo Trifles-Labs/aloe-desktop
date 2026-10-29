@@ -25,6 +25,7 @@ use tokio::sync::{
 use super::{
     audio::{earcon, Earcon, Pcm16Decoder, Player},
     backend::Backend,
+    latency,
     speech::split_for_speech,
 };
 use crate::config::{debug_log, AppState, VOICE_MAX_SPEAK_CHARS};
@@ -161,8 +162,10 @@ async fn run(app: AppHandle, mut items: UnboundedReceiver<(u64, Item)>, shared: 
                     if skipped() {
                         break;
                     }
+                    latency::mark("speak_sent");
                     let response = match backend.speak(&part, &prefs.pace).await {
                         Ok(response) => {
+                            latency::mark("speak_headers");
                             failing = false;
                             response
                         }
@@ -192,6 +195,7 @@ async fn run(app: AppHandle, mut items: UnboundedReceiver<(u64, Item)>, shared: 
                         samples.clear();
                         decoder.push(&chunk, &mut samples);
                         player.push(&samples);
+                        latency::mark("first_audio");
                     }
                 }
             }

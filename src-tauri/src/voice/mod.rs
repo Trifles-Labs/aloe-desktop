@@ -21,6 +21,7 @@
 
 pub mod audio;
 mod backend;
+mod latency;
 pub mod hotkey;
 pub mod overlay;
 mod prompts;
@@ -80,6 +81,10 @@ static LISTEN_ID: AtomicU64 = AtomicU64::new(0);
 static PROMPTS: Mutex<Option<(u64, UnboundedSender<Prompt>)>> = Mutex::new(None);
 /// The last reply's sentences, for "say that again".
 static LAST_REPLY: Mutex<Vec<String>> = Mutex::new(Vec::new());
+/// How long a finished sentence waits before it is spoken, in case a tool call follows it.
+const SPEECH_HOLD: Duration = Duration::from_millis(350);
+/// Said once when a tool starts before Aloe has said anything.
+const TOOL_FILLER: &str = "One moment.";
 
 /// Installs the keyboard watcher and starts the session loop. Called once, from setup.
 pub fn start(app: &AppHandle) {
@@ -520,6 +525,7 @@ async fn place_overlay(app: &AppHandle) {
 fn finish(app: &AppHandle, speaker: &Speaker, session: &mut Session, listening: Listening) {
     let Listening { generation, capture, transcribe, meter, backend, purpose, screen, .. } = listening;
     meter.abort();
+    latency::start();
     overlay::level(app, 0.0);
     // Stopping the capture closes the audio channel, which is the transcriber's cue to commit.
     capture.stop();
@@ -545,7 +551,10 @@ fn finish(app: &AppHandle, speaker: &Speaker, session: &mut Session, listening: 
                 let (app, speaker, backend, finished, conversation) = (app.clone(), speaker.clone(), backend.clone(), finished.clone(), conversation.clone());
                 tauri::async_runtime::spawn(async move {
                     let said = match transcribe.await {
-                        Ok(Ok(text)) => text,
+                        Ok(Ok(text)) => {
+                            latency::mark("transcript_final");
+                            text
+                        }
                         Ok(Err(error)) => return fail(&app, &speaker, generation, error),
                         Err(_) => return,
                     };
@@ -583,6 +592,7 @@ fn finish(app: &AppHandle, speaker: &Speaker, session: &mut Session, listening: 
                         },
                         None => Vec::new(),
                     };
+                    latency::mark("screenshot_ready");
                     match reply(&app, &speaker, generation, &backend, &conversation_id, &said, &attachment_ids, &finished).await {
                         Ok(asked) => {
                             update(&app, generation, |view| {
@@ -694,7 +704,9 @@ impl Drop for PromptRoute {
 /// Streams Aloe's answer into the overlay and out of the speaker, stopping for prompts along the
 /// way. Returns once everything has been said, with whether the reply ended by asking something.
 async fn reply(app: &AppHandle, speaker: &Speaker, generation: u64, backend: &Backend, conversation_id: &str, message: &str, attachment_ids: &[String], finished: &Arc<AtomicBool>) -> Result<bool, String> {
+    latency::mark("chat_sent");
     let response = backend.chat(conversation_id, message, attachment_ids).await?;
+    latency::mark("chat_headers");
     let (_route, mut queued_commands) = PromptRoute::open(generation);
     LAST_REPLY.lock().unwrap_or_else(std::sync::PoisonError::into_inner).clear();
 
@@ -706,12 +718,27 @@ async fn reply(app: &AppHandle, speaker: &Speaker, generation: u64, backend: &Ba
         LAST_REPLY.lock().unwrap_or_else(std::sync::PoisonError::into_inner).push(sentence.clone());
         speaker.say(sentence);
     };
+    // Sentences are spoken as they complete, so Aloe starts talking while the rest streams in.
+    // Each waits SPEECH_HOLD first: text that is followed straight away by a tool call or a
+    // progress line was narration ("Let me look that up."), and is dropped unsaid.
+    let mut speech = SpeechStream::default();
+    let mut held: Vec<String> = Vec::new();
+    let mut release_at: Option<tokio::time::Instant> = None;
+    let mut spoke = false;
 
     'stream: loop {
         let chunk = tokio::select! {
             chunk = stream.next() => chunk,
             Some(prompt) = queued_commands.recv() => {
                 ask(app, speaker, generation, backend, prompt).await;
+                continue;
+            }
+            _ = tokio::time::sleep_until(release_at.unwrap_or_else(tokio::time::Instant::now)), if release_at.is_some() => {
+                release_at = None;
+                for sentence in held.drain(..) {
+                    spoke = true;
+                    say(sentence);
+                }
                 continue;
             }
         };
@@ -723,11 +750,17 @@ async fn reply(app: &AppHandle, speaker: &Speaker, generation: u64, backend: &Ba
             let line = String::from_utf8_lossy(&line);
             let Some(data) = line.trim().strip_prefix("data: ") else { continue };
             let Ok(event) = serde_json::from_str::<Value>(data) else { continue };
+            latency::mark("first_event");
             let field = |name: &str| event.get(name).and_then(Value::as_str).unwrap_or_default().to_string();
             match event.get("type").and_then(Value::as_str).unwrap_or_default() {
                 "text" => {
+                    latency::mark("first_text");
                     let content = field("content");
                     text.push_str(&content);
+                    held.extend(speech.push(&content));
+                    if !held.is_empty() && release_at.is_none() {
+                        release_at = Some(tokio::time::Instant::now() + SPEECH_HOLD);
+                    }
                     let shown = text.clone();
                     update(app, generation, |view| {
                         view.phase = Phase::Speaking;
@@ -736,13 +769,24 @@ async fn reply(app: &AppHandle, speaker: &Speaker, generation: u64, backend: &Ba
                     });
                 }
                 kind @ ("status" | "notice" | "tool_start") => {
+                    latency::mark("first_status_or_tool");
                     let status = if kind == "tool_start" { field("label") } else { field("content") };
                     if status.is_empty() {
                         continue;
                     }
                     // Anything before a tool call or progress line was setup, not the answer.
-                    // Drop it so the speaker only ever reads the final reply.
+                    // Drop what hasn't been said so the speaker reads only the answer.
                     text.clear();
+                    held.clear();
+                    release_at = None;
+                    speech = SpeechStream::default();
+                    // Something to hear while a tool works, once, if Aloe hasn't spoken yet. The
+                    // tool's own label is only shown: it can be long or technical.
+                    if kind == "tool_start" && !spoke {
+                        spoke = true;
+                        // Not part of the reply, so "say that again" skips it.
+                        speaker.say(TOOL_FILLER);
+                    }
                     update(app, generation, |view| {
                         view.reply.clear();
                         view.status = Some(status);
@@ -758,6 +802,9 @@ async fn reply(app: &AppHandle, speaker: &Speaker, generation: u64, backend: &Ba
                 // The backend restarted the answer (a model fallback); what was shown is void.
                 "reset_assistant" => {
                     text.clear();
+                    held.clear();
+                    release_at = None;
+                    speech = SpeechStream::default();
                     update(app, generation, |view| view.reply.clear());
                 }
                 "reply_complete" | "done" => break 'stream,
@@ -766,10 +813,9 @@ async fn reply(app: &AppHandle, speaker: &Speaker, generation: u64, backend: &Ba
         }
     }
     finished.store(true, Ordering::SeqCst);
-    // Read the reply once the turn has fully settled: text emitted before a tool call or a
-    // progress line was narration, and was dropped above, so only the answer is left.
-    let mut speech = SpeechStream::default();
-    for sentence in speech.push(&text) {
+    latency::mark("reply_complete");
+    // The turn is over: whatever was held back, and the last unfinished sentence.
+    for sentence in held.drain(..) {
         say(sentence);
     }
     for sentence in speech.flush() {

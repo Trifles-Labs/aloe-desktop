@@ -1,25 +1,29 @@
-//! The push-to-talk overlay: a glow around the display the pointer is on, and a panel at its
-//! bottom centre with the live transcript and Aloe's reply. Both are windows of voice.html.
+//! The push-to-talk overlay: one window of voice.html over the whole display the pointer is on.
+//! It draws a glow around the edge and an island that drops down from the top centre, with the
+//! live transcript and Aloe's reply. While Aloe uses the computer during a voice turn, the island
+//! also carries the desktop-control status and its Stop, in place of overlay.rs's own pill.
 //!
 //! The same rules as the desktop-control overlay (overlay.rs) apply, for the same reasons: created
 //! unfocused and never `show()`n again (that would activate it on Windows and steal the keyboard
 //! from the app the user is talking over), faded in and out by the page, content-protected so
-//! Aloe's own screenshots never contain them, and fed by `eval` rather than app events.
+//! Aloe's own screenshots never contain it, and fed by `eval` rather than app events.
+//!
+//! The window covers the display but is click-through everywhere except the island: the page
+//! reports the island's rectangle, and a watcher lets the window take the cursor only while the
+//! pointer is over it.
 
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
+use std::time::Duration;
 
 use serde::Serialize;
 use tauri::{AppHandle, Manager, WebviewUrl, WebviewWindow, WebviewWindowBuilder};
 
 use crate::config::{debug_log, AppState};
 
-const GLOW_LABEL: &str = "voice-glow";
-const PANEL_LABEL: &str = "voice-panel";
-/// Panel size and gap from the bottom of the display, in logical pixels. Tall enough for a few
-/// lines of reply; the page fades older lines out at the top.
-const PANEL_WIDTH: f64 = 560.0;
-const PANEL_HEIGHT: f64 = 260.0;
-const PANEL_BOTTOM: f64 = 96.0;
+const STAGE_LABEL: &str = "voice-stage";
+/// How often the pointer is checked against the island while the overlay shows.
+const HIT_INTERVAL: Duration = Duration::from_millis(30);
 
 #[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq, Default)]
 #[serde(rename_all = "lowercase")]
@@ -62,16 +66,73 @@ pub struct View {
     /// From the voice preferences, filled in by `show`.
     pub text_size: String,
     pub high_contrast: bool,
+    /// Aloe is using the computer (overlay.rs), shown in the island while voice is up.
+    pub control: bool,
+}
+
+/// The island's rectangle, in logical pixels relative to the stage.
+#[derive(Debug, Clone, Copy, serde::Deserialize)]
+pub struct Rect {
+    pub x: f64,
+    pub y: f64,
+    pub width: f64,
+    pub height: f64,
+}
+
+/// Where the stage sits, in physical pixels, so the pointer can be made relative to it.
+#[derive(Debug, Clone, Copy)]
+struct Stage {
+    x: f64,
+    y: f64,
+    scale: f64,
 }
 
 static VIEW: Mutex<Option<View>> = Mutex::new(None);
+static STAGE: Mutex<Option<Stage>> = Mutex::new(None);
+static WATCHING: AtomicBool = AtomicBool::new(false);
+static ISLAND: Mutex<Option<Rect>> = Mutex::new(None);
+/// Cleared while Aloe itself clicks, so a synthetic click at the top of the screen reaches the
+/// app beneath rather than the island.
+static CLICKABLE: AtomicBool = AtomicBool::new(true);
+
+/// The overlay is up: overlay.rs then leaves the desktop-control status to the island.
+pub fn is_showing() -> bool {
+    VIEW.lock().unwrap_or_else(std::sync::PoisonError::into_inner).as_ref().is_some_and(|view| view.phase != Phase::Idle)
+}
+
+/// Desktop control started or stopped: re-render with the new status.
+pub fn sync_control(app: &AppHandle) {
+    if is_showing() {
+        render(app, current());
+    }
+}
+
+/// See `CLICKABLE`.
+pub fn set_clickable(clickable: bool) {
+    CLICKABLE.store(clickable, Ordering::SeqCst);
+}
+
+/// The page's island moved or resized; `None` once it has gone.
+pub fn set_island(rect: Option<Rect>) {
+    *ISLAND.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = rect;
+}
 
 /// The current view, for a page that loaded after it was last pushed.
 pub fn current() -> View {
     VIEW.lock().unwrap_or_else(std::sync::PoisonError::into_inner).clone().unwrap_or_default()
 }
 
-pub fn show(app: &AppHandle, mut view: View) {
+pub fn show(app: &AppHandle, view: View) {
+    let was_showing = is_showing();
+    render(app, view);
+    if was_showing != is_showing() {
+        // The island takes over (or hands back) the desktop-control pill.
+        crate::overlay::sync_windows(app);
+    }
+}
+
+fn render(app: &AppHandle, mut view: View) {
+    view.control = crate::overlay::is_active();
     {
         let config = app.state::<AppState>().config.lock().unwrap_or_else(std::sync::PoisonError::into_inner).voice.clone();
         view.text_size = config.text_size;
@@ -80,75 +141,83 @@ pub fn show(app: &AppHandle, mut view: View) {
     let json = serde_json::to_string(&view).unwrap_or_else(|_| "{}".to_string());
     let idle = view.phase == Phase::Idle;
     *VIEW.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some(view);
-    for label in [GLOW_LABEL, PANEL_LABEL] {
-        if let Some(window) = app.get_webview_window(label) {
-            let _ = window.eval(&format!("window.__aloeVoice?.({json})"));
-        }
+    if let Some(window) = app.get_webview_window(STAGE_LABEL) {
+        let _ = window.eval(&format!("window.__aloeVoice?.({json})"));
     }
-    // A faded-out panel must not eat clicks meant for whatever is under it.
-    if let Some(panel) = app.get_webview_window(PANEL_LABEL) {
-        let _ = panel.set_ignore_cursor_events(idle);
+    if idle {
+        WATCHING.store(false, Ordering::SeqCst);
+        set_island(None);
+        if let Some(window) = app.get_webview_window(STAGE_LABEL) {
+            let _ = window.set_ignore_cursor_events(true);
+        }
+    } else if !WATCHING.swap(true, Ordering::SeqCst) {
+        watch_pointer(app.clone());
     }
 }
 
-/// Microphone loudness, 0–1, for the glow and the panel's dot. Sent on its own, as one CSS
-/// variable, so it never re-renders the text.
+/// Microphone loudness, 0–1, for the glow and the companion. Sent on its own, as one number, so
+/// it never re-renders the text.
 pub fn level(app: &AppHandle, level: f32) {
-    let script = format!("window.__aloeVoiceLevel?.({:.3})", level.clamp(0.0, 1.0));
-    for label in [GLOW_LABEL, PANEL_LABEL] {
-        if let Some(window) = app.get_webview_window(label) {
-            let _ = window.eval(&script);
-        }
+    if let Some(window) = app.get_webview_window(STAGE_LABEL) {
+        let _ = window.eval(&format!("window.__aloeVoiceLevel?.({:.3})", level.clamp(0.0, 1.0)));
     }
 }
 
-/// Creates the windows on first use and moves them to the display the pointer is on. Blocking:
+/// Lets the stage take the cursor only while the pointer is over the island, until the overlay
+/// goes idle. A thread of its own: reading the pointer waits on the event loop, so it must not run
+/// on it or on the async workers.
+fn watch_pointer(app: AppHandle) {
+    std::thread::spawn(move || {
+        let mut taking = false;
+        while WATCHING.load(Ordering::SeqCst) {
+            let over = match (app.cursor_position(), *STAGE.lock().unwrap_or_else(std::sync::PoisonError::into_inner), *ISLAND.lock().unwrap_or_else(std::sync::PoisonError::into_inner)) {
+                (Ok(pointer), Some(stage), Some(island)) => {
+                    let x = (pointer.x - stage.x) / stage.scale;
+                    let y = (pointer.y - stage.y) / stage.scale;
+                    x >= island.x && y >= island.y && x < island.x + island.width && y < island.y + island.height
+                }
+                _ => false,
+            };
+            let take = over && CLICKABLE.load(Ordering::SeqCst);
+            if take != taking {
+                if let Some(window) = app.get_webview_window(STAGE_LABEL) {
+                    if window.set_ignore_cursor_events(!take).is_ok() {
+                        taking = take;
+                    }
+                }
+            }
+            std::thread::sleep(HIT_INTERVAL);
+        }
+    });
+}
+
+/// Creates the window on first use and moves it to the display the pointer is on. Blocking:
 /// reading the pointer position waits on the event loop, so this must not run on it.
 pub fn prepare(app: &AppHandle) {
-    if let Err(error) = place_windows(app) {
+    if let Err(error) = place_window(app) {
         // The overlay is a courtesy: listening goes on without it.
         debug_log("voice", "overlay_error", error);
     }
 }
 
-/// The panel grows with the text size, within most of the display.
-fn panel_size(text_size: &str, display_width: f64, display_height: f64) -> (f64, f64) {
-    let factor = match text_size {
-        "s" => 0.9,
-        "l" => 1.25,
-        "xl" => 1.55,
-        _ => 1.0,
-    };
-    ((PANEL_WIDTH * factor).min(display_width * 0.9), (PANEL_HEIGHT * factor).min(display_height * 0.55))
-}
-
-fn place_windows(app: &AppHandle) -> Result<(), String> {
+fn place_window(app: &AppHandle) -> Result<(), String> {
     let monitor = monitor_under_pointer(app)?;
     let scale = monitor.scale_factor();
-    let x = monitor.position().x as f64 / scale;
-    let y = monitor.position().y as f64 / scale;
-    let width = monitor.size().width as f64 / scale;
-    let height = monitor.size().height as f64 / scale;
-    let text_size = app.state::<AppState>().config.lock().unwrap_or_else(std::sync::PoisonError::into_inner).voice.text_size.clone();
-    let (panel_width, panel_height) = panel_size(&text_size, width, height);
-    let panel_x = x + (width - panel_width) / 2.0;
-    let panel_y = y + height - panel_height - PANEL_BOTTOM;
+    let (position, size) = (monitor.position(), monitor.size());
+    *STAGE.lock().unwrap_or_else(std::sync::PoisonError::into_inner) =
+        Some(Stage { x: position.x as f64, y: position.y as f64, scale });
+    let x = position.x as f64 / scale;
+    let y = position.y as f64 / scale;
+    let width = size.width as f64 / scale;
+    let height = size.height as f64 / scale;
 
-    match app.get_webview_window(GLOW_LABEL) {
-        Some(glow) => reposition(&glow, x, y, width, height)?,
+    match app.get_webview_window(STAGE_LABEL) {
+        Some(stage) => reposition(&stage, x, y, width, height),
         None => {
-            let glow = overlay_window(app, GLOW_LABEL, x, y, width, height)?;
-            glow.set_ignore_cursor_events(true).map_err(|e| e.to_string())?;
+            let stage = overlay_window(app, x, y, width, height)?;
+            stage.set_ignore_cursor_events(true).map_err(|e| e.to_string())
         }
     }
-    match app.get_webview_window(PANEL_LABEL) {
-        Some(panel) => reposition(&panel, panel_x, panel_y, panel_width, panel_height)?,
-        None => {
-            let panel = overlay_window(app, PANEL_LABEL, panel_x, panel_y, panel_width, panel_height)?;
-            panel.set_ignore_cursor_events(true).map_err(|e| e.to_string())?;
-        }
-    }
-    Ok(())
 }
 
 fn monitor_under_pointer(app: &AppHandle) -> Result<tauri::Monitor, String> {
@@ -175,8 +244,8 @@ fn reposition(window: &WebviewWindow, x: f64, y: f64, width: f64, height: f64) -
     Ok(())
 }
 
-fn overlay_window(app: &AppHandle, label: &str, x: f64, y: f64, width: f64, height: f64) -> Result<WebviewWindow, String> {
-    WebviewWindowBuilder::new(app, label, WebviewUrl::App("voice.html".into()))
+fn overlay_window(app: &AppHandle, x: f64, y: f64, width: f64, height: f64) -> Result<WebviewWindow, String> {
+    WebviewWindowBuilder::new(app, STAGE_LABEL, WebviewUrl::App("voice.html".into()))
         .title("Aloe is listening")
         .position(x, y)
         .inner_size(width, height)

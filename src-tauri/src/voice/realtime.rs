@@ -48,6 +48,8 @@ pub async fn transcribe(backend: &Backend, mut audio: UnboundedReceiver<Vec<i16>
                 "noise_reduction": { "type": "near_field" },
                 "transcription": {
                     "model": "gpt-live-transcribe",
+                    // English only: left to guess, a mumble came back as Chinese and Vietnamese.
+                    "language": "en",
                     "prompt": "Someone talking to Aloe, their AI assistant on their computer, asking it a question or to do something.",
                 },
                 "turn_detection": null,
