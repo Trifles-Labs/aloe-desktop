@@ -144,18 +144,31 @@
         .close:hover { background: rgb(244 247 240 / 0.16); color: var(--cream); }
       }
 
-      /* Newest text at the bottom; older lines fade out at the top rather than scroll. */
+      /* Scrolls. The script keeps the word being spoken in view (or the newest text, once Aloe is
+         quiet) unless the user has just scrolled; whichever edge has more text fades out. */
       .body {
-        display: flex; flex-direction: column; justify-content: flex-end; gap: 6px;
+        position: relative;
+        display: flex; flex-direction: column; gap: 6px;
         max-height: calc(200px * var(--scale));
-        overflow: hidden;
+        overflow-x: hidden; overflow-y: auto;
+        overscroll-behavior: contain;
+        scrollbar-width: thin;
+        scrollbar-color: rgb(244 247 240 / 0.22) transparent;
         padding: 0 calc(8px * var(--scale));
       }
       #root:not([data-content]) .body { display: none; }
       #root[data-content] .body { margin-top: calc(8px * var(--scale)); }
-      .body[data-clipped] {
+      .body[data-clip-top] {
         -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 26px);
         mask-image: linear-gradient(to bottom, transparent 0, #000 26px);
+      }
+      .body[data-clip-bottom] {
+        -webkit-mask-image: linear-gradient(to top, transparent 0, #000 26px);
+        mask-image: linear-gradient(to top, transparent 0, #000 26px);
+      }
+      .body[data-clip-top][data-clip-bottom] {
+        -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 26px, #000 calc(100% - 26px), transparent 100%);
+        mask-image: linear-gradient(to bottom, transparent 0, #000 26px, #000 calc(100% - 26px), transparent 100%);
       }
       .said, .reply, .status, .error, .ask-text, .ask-hint { margin: 0; }
       .said, .reply { white-space: pre-wrap; overflow-wrap: anywhere; font-size: calc(15px * var(--scale)); }
@@ -172,6 +185,21 @@
       @keyframes word { from { opacity: 0; filter: blur(2px); } to { opacity: 1; filter: none; } }
       .rewrite { animation: rewrite 160ms ease both; }
       @keyframes rewrite { from { opacity: 0.35; } to { opacity: 1; } }
+
+      /* Read-along: while Aloe speaks, words not yet said are dimmed, said ones brighten, and a
+         soft pill glides over the word being spoken. */
+      .reply .wd {
+        border-radius: 0.3em;
+        -webkit-box-decoration-break: clone; box-decoration-break: clone;
+        transition: color 280ms ease, background-color 280ms ease, box-shadow 280ms ease;
+      }
+      #root[data-reading] .reply .wd { color: rgb(244 247 240 / 0.45); }
+      #root[data-reading] .reply .wd[data-said] { color: var(--cream); }
+      #root[data-reading] .reply .wd[data-now] {
+        color: var(--cream);
+        background-color: rgb(var(--tint) / 0.26);
+        box-shadow: 0 0 0 0.14em rgb(var(--tint) / 0.26);
+      }
 
       /* Waiting for a spoken answer: the question, with numbered choices and what to say. */
       .ask { display: none; }
@@ -208,7 +236,8 @@
         --surface: #000;
       }
       [data-contrast="high"] .island { box-shadow: inset 0 0 0 3px #ffd400; -webkit-backdrop-filter: none; backdrop-filter: none; }
-      [data-contrast="high"] .body { -webkit-mask-image: none; mask-image: none; }
+      [data-contrast="high"] .body { -webkit-mask-image: none !important; mask-image: none !important; scrollbar-color: #fff #000; }
+      [data-contrast="high"] #root[data-reading] .reply .wd[data-now] { background-color: #ffd400; box-shadow: 0 0 0 0.14em #ffd400; color: #000; }
       [data-contrast="high"] .orb { background: #000; box-shadow: 0 0 0 2px #ffd400; }
       [data-contrast="high"] .orb::before { display: none; }
       [data-contrast="high"] [data-phase="thinking"] .label, [data-contrast="high"] .label { animation: none; background: none; color: var(--cream); }
@@ -219,6 +248,7 @@
       @media (prefers-reduced-motion: reduce) {
         .island, #root[data-open] .island { transform: translate(-50%, 0); transition: opacity 160ms linear; }
         .orb::before, .ring, [data-phase="error"] .orb, .label, .w, .rewrite, .ask-options li, #root[data-control] .stop { animation: none !important; }
+        .reply .wd { transition: none; }
       }
     </style>
   </head>

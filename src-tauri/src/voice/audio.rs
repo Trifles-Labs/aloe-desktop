@@ -8,7 +8,7 @@
 use std::{
     collections::VecDeque,
     sync::{
-        atomic::{AtomicBool, AtomicU32, Ordering},
+        atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering},
         mpsc, Arc, Mutex,
     },
     thread::JoinHandle,
@@ -426,6 +426,11 @@ where
 pub struct Player {
     queue: Arc<Mutex<VecDeque<f32>>>,
     resampler: Mutex<Resampler>,
+    /// Device-rate samples ever queued, and ever played (or cleared). Both move under the queue's
+    /// lock, so `played` never passes `pushed`; the gap is what is still to be heard.
+    pushed: AtomicU64,
+    played: Arc<AtomicU64>,
+    rate: u32,
     stop: Arc<AtomicBool>,
     thread: Option<JoinHandle<()>>,
 }
@@ -433,14 +438,15 @@ pub struct Player {
 impl Player {
     pub fn start() -> Result<Player, String> {
         let queue = Arc::new(Mutex::new(VecDeque::new()));
+        let played = Arc::new(AtomicU64::new(0));
         let stop = Arc::new(AtomicBool::new(false));
         let (ready_tx, ready_rx) = mpsc::sync_channel::<Result<u32, String>>(1);
         let thread = {
-            let (queue, stop) = (queue.clone(), stop.clone());
+            let (queue, played, stop) = (queue.clone(), played.clone(), stop.clone());
             std::thread::Builder::new()
                 .name("aloe-voice-speaker".into())
                 .spawn(move || {
-                    let (stream, rate) = match open_output(queue) {
+                    let (stream, rate) = match open_output(queue, played) {
                         Ok(opened) => opened,
                         Err(error) => {
                             let _ = ready_tx.send(Err(error));
@@ -456,7 +462,15 @@ impl Player {
                 .map_err(|e| e.to_string())?
         };
         match ready_rx.recv() {
-            Ok(Ok(rate)) => Ok(Player { queue, resampler: Mutex::new(Resampler::new(VOICE_RATE, rate)), stop, thread: Some(thread) }),
+            Ok(Ok(rate)) => Ok(Player {
+                queue,
+                resampler: Mutex::new(Resampler::new(VOICE_RATE, rate)),
+                pushed: AtomicU64::new(0),
+                played,
+                rate,
+                stop,
+                thread: Some(thread),
+            }),
             Ok(Err(error)) => Err(error),
             Err(_) => Err("The speaker stopped before it started.".to_string()),
         }
@@ -466,12 +480,31 @@ impl Player {
     pub fn push(&self, samples: &[f32]) {
         let mut out = Vec::with_capacity(samples.len() * 2);
         self.resampler.lock().unwrap_or_else(std::sync::PoisonError::into_inner).process(samples, &mut out);
-        self.queue.lock().unwrap_or_else(std::sync::PoisonError::into_inner).extend(out);
+        let mut queue = self.queue.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        self.pushed.fetch_add(out.len() as u64, Ordering::SeqCst);
+        queue.extend(out);
     }
 
     /// Silences whatever is queued.
     pub fn clear(&self) {
-        self.queue.lock().unwrap_or_else(std::sync::PoisonError::into_inner).clear();
+        let mut queue = self.queue.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        self.played.fetch_add(queue.len() as u64, Ordering::SeqCst);
+        queue.clear();
+    }
+
+    /// Where the queue ends, in device samples: what has been pushed so far.
+    pub fn pushed(&self) -> u64 {
+        self.pushed.load(Ordering::SeqCst)
+    }
+
+    /// How far playback has got, in device samples.
+    pub fn played(&self) -> u64 {
+        self.played.load(Ordering::SeqCst)
+    }
+
+    /// The device's sample rate.
+    pub fn rate(&self) -> u32 {
+        self.rate
     }
 
     pub fn is_idle(&self) -> bool {
@@ -488,25 +521,25 @@ impl Drop for Player {
     }
 }
 
-fn open_output(queue: Arc<Mutex<VecDeque<f32>>>) -> Result<(cpal::Stream, u32), String> {
+fn open_output(queue: Arc<Mutex<VecDeque<f32>>>, played: Arc<AtomicU64>) -> Result<(cpal::Stream, u32), String> {
     let device = cpal::default_host().default_output_device().ok_or_else(|| "No speaker found.".to_string())?;
     let supported = device.default_output_config().map_err(|e| format!("Couldn't open the speaker: {e}"))?;
     let format = supported.sample_format();
     let config: StreamConfig = supported.into();
     let rate = config.sample_rate;
     let stream = match format {
-        SampleFormat::F32 => build_output::<f32>(&device, &config, queue),
-        SampleFormat::I16 => build_output::<i16>(&device, &config, queue),
-        SampleFormat::I32 => build_output::<i32>(&device, &config, queue),
-        SampleFormat::U16 => build_output::<u16>(&device, &config, queue),
-        SampleFormat::U8 => build_output::<u8>(&device, &config, queue),
+        SampleFormat::F32 => build_output::<f32>(&device, &config, queue, played),
+        SampleFormat::I16 => build_output::<i16>(&device, &config, queue, played),
+        SampleFormat::I32 => build_output::<i32>(&device, &config, queue, played),
+        SampleFormat::U16 => build_output::<u16>(&device, &config, queue, played),
+        SampleFormat::U8 => build_output::<u8>(&device, &config, queue, played),
         other => return Err(format!("The speaker uses an unsupported sample format ({other}).")),
     }?;
     stream.play().map_err(|e| format!("Couldn't start the speaker: {e}"))?;
     Ok((stream, rate))
 }
 
-fn build_output<T>(device: &cpal::Device, config: &StreamConfig, queue: Arc<Mutex<VecDeque<f32>>>) -> Result<cpal::Stream, String>
+fn build_output<T>(device: &cpal::Device, config: &StreamConfig, queue: Arc<Mutex<VecDeque<f32>>>, played: Arc<AtomicU64>) -> Result<cpal::Stream, String>
 where
     T: SizedSample + FromSample<f32>,
 {
@@ -516,10 +549,12 @@ where
             config.clone(),
             move |data: &mut [T], _: &cpal::OutputCallbackInfo| {
                 let mut queue = queue.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+                let before = queue.len();
                 for frame in data.chunks_mut(channels) {
                     let sample = T::from_sample(queue.pop_front().unwrap_or(0.0));
                     frame.fill(sample);
                 }
+                played.fetch_add((before - queue.len()) as u64, Ordering::SeqCst);
             },
             |error| debug_log("voice", "speaker_stream_error", error.to_string()),
             None,

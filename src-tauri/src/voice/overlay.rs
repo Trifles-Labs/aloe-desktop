@@ -163,6 +163,18 @@ pub fn level(app: &AppHandle, level: f32) {
     }
 }
 
+/// What the voice is saying right now and how far into it, 0–1, so the page can light up the
+/// words as they are heard; `None` between sentences. On its own, like `level`.
+pub fn spoken(app: &AppHandle, now: Option<(&str, f32)>) {
+    if let Some(window) = app.get_webview_window(STAGE_LABEL) {
+        let json = match now {
+            Some((text, at)) => serde_json::json!({ "text": text, "at": at }).to_string(),
+            None => "null".to_string(),
+        };
+        let _ = window.eval(&format!("window.__aloeVoiceSpoken?.({json})"));
+    }
+}
+
 /// Lets the stage take the cursor only while the pointer is over the island, until the overlay
 /// goes idle. A thread of its own: reading the pointer waits on the event loop, so it must not run
 /// on it or on the async workers.

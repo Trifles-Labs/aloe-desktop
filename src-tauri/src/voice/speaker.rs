@@ -8,6 +8,7 @@
 //! reply never swallows the approval question that follows.
 
 use std::{
+    collections::VecDeque,
     sync::{
         atomic::{AtomicU64, AtomicUsize, Ordering},
         Arc, Mutex,
@@ -25,7 +26,7 @@ use tokio::sync::{
 use super::{
     audio::{earcon, Earcon, Pcm16Decoder, Player},
     backend::Backend,
-    latency,
+    latency, overlay,
     speech::split_for_speech,
 };
 use crate::config::{debug_log, AppState, VOICE_MAX_SPEAK_CHARS};
@@ -33,6 +34,19 @@ use crate::models::VoicePrefs;
 
 /// The speaker closes the audio device after this long with nothing to say.
 const IDLE_CLOSE: Duration = Duration::from_secs(5);
+/// How often the overlay hears how far through the current sentence Aloe is.
+const PROGRESS_INTERVAL: Duration = Duration::from_millis(50);
+/// A rough speaking pace, for guessing a sentence's length while its audio is still arriving.
+const SECONDS_PER_CHAR: f64 = 0.065;
+
+/// A piece of text queued on the player, and where its audio sits in the player's samples.
+struct Said {
+    text: String,
+    start: u64,
+    end: u64,
+    /// All of its audio has arrived, so `end` is final.
+    complete: bool,
+}
 
 enum Item {
     /// `always`: said even with "read replies aloud" off (questions, approvals, errors).
@@ -53,6 +67,8 @@ struct Shared {
     skip_through: AtomicU64,
     queued: AtomicUsize,
     player: Mutex<Option<Arc<Player>>>,
+    /// What is queued on the player and not yet heard, oldest first, so the overlay can follow along.
+    said: Mutex<VecDeque<Said>>,
     /// Shown once per failure streak, not per sentence.
     on_error: Mutex<Option<Box<dyn Fn(String) + Send + Sync>>>,
 }
@@ -65,9 +81,11 @@ impl Speaker {
             skip_through: AtomicU64::new(0),
             queued: AtomicUsize::new(0),
             player: Mutex::new(None),
+            said: Mutex::new(VecDeque::new()),
             on_error: Mutex::new(None),
         });
         tauri::async_runtime::spawn(run(app.clone(), receiver, shared.clone()));
+        tauri::async_runtime::spawn(follow(app.clone(), shared.clone()));
         Speaker { items, shared }
     }
 
@@ -107,6 +125,7 @@ impl Speaker {
         if let Some(player) = self.shared.player.lock().unwrap_or_else(std::sync::PoisonError::into_inner).as_ref() {
             player.clear();
         }
+        lock(&self.shared.said).clear();
     }
 
     /// Talking, or about to.
@@ -185,6 +204,8 @@ async fn run(app: AppHandle, mut items: UnboundedReceiver<(u64, Item)>, shared: 
                         }
                     };
                     let Some(player) = ensure_player(&shared).await else { break };
+                    let start = player.pushed();
+                    lock(&shared.said).push_back(Said { text: part.clone(), start, end: start, complete: false });
                     let mut decoder = Pcm16Decoder::default();
                     let mut body = response.bytes_stream();
                     while let Some(Ok(chunk)) = body.next().await {
@@ -195,7 +216,14 @@ async fn run(app: AppHandle, mut items: UnboundedReceiver<(u64, Item)>, shared: 
                         samples.clear();
                         decoder.push(&chunk, &mut samples);
                         player.push(&samples);
+                        if let Some(said) = lock(&shared.said).iter_mut().rev().find(|said| said.start == start) {
+                            said.end = player.pushed();
+                        }
                         latency::mark("first_audio");
+                    }
+                    if let Some(said) = lock(&shared.said).iter_mut().rev().find(|said| said.start == start) {
+                        said.end = player.pushed();
+                        said.complete = true;
                     }
                 }
             }
@@ -203,6 +231,50 @@ async fn run(app: AppHandle, mut items: UnboundedReceiver<(u64, Item)>, shared: 
         }
         shared.queued.fetch_sub(1, Ordering::SeqCst);
     }
+}
+
+/// Tells the overlay which text is being heard and how far into it the voice is, so it can light
+/// up the words as they are said. Silent while nothing is playing.
+async fn follow(app: AppHandle, shared: Arc<Shared>) {
+    let mut last: Option<(String, u16)> = None;
+    loop {
+        tokio::time::sleep(PROGRESS_INTERVAL).await;
+        let now = hearing(&shared).map(|(text, at)| (text, (at * 1000.0).round() as u16));
+        if now == last {
+            continue;
+        }
+        overlay::spoken(&app, now.as_ref().map(|(text, at)| (text.as_str(), f32::from(*at) / 1000.0)));
+        last = now;
+    }
+}
+
+/// The text playing right now, and how far through it playback is, 0–1.
+fn hearing(shared: &Shared) -> Option<(String, f64)> {
+    let player = player(shared)?;
+    let played = player.played();
+    let mut said = lock(&shared.said);
+    while said.front().is_some_and(|front| front.complete && front.end <= played) {
+        said.pop_front();
+    }
+    let current = said.front()?;
+    if played < current.start || current.end <= current.start {
+        // An earcon, or a sentence whose audio hasn't started arriving.
+        return None;
+    }
+    let heard = (played - current.start) as f64;
+    let length = (current.end - current.start) as f64;
+    let at = if current.complete {
+        heard / length
+    } else {
+        // Still downloading: guess its full length, and never claim the end before it arrives.
+        let guess = current.text.chars().count() as f64 * SECONDS_PER_CHAR * f64::from(player.rate());
+        (heard / length.max(guess)).min(0.95)
+    };
+    Some((current.text.clone(), at.clamp(0.0, 1.0)))
+}
+
+fn lock<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
+    mutex.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
 }
 
 fn settings(app: &AppHandle) -> (VoicePrefs, Option<Backend>) {
@@ -222,6 +294,8 @@ async fn ensure_player(shared: &Arc<Shared>) -> Option<Arc<Player>> {
     match tauri::async_runtime::spawn_blocking(Player::start).await.map_err(|e| e.to_string()).and_then(|started| started) {
         Ok(started) => {
             let started = Arc::new(started);
+            // Positions on the old player mean nothing on the new one.
+            lock(&shared.said).clear();
             *shared.player.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some(started.clone());
             Some(started)
         }

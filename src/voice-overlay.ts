@@ -68,35 +68,138 @@ const plain = (markdown: string) =>
     .replace(/\n{3,}/g, "\n\n")
     .trim();
 
-/* Text that grows (a live transcript, a streaming reply) only animates its new words; anything
-   else is a rewrite and fades over as a whole. */
+/* Every word is a span of its own (.wd), so the read-along can light it up. Text that grows (a
+   live transcript, a streaming reply) only animates its new words; anything else is a rewrite and
+   fades over as a whole. Returns what happened. */
 const shown = new WeakMap<HTMLElement, string>();
-const flow = (element: HTMLElement, next: string) => {
+const words = (text: string, animate: boolean): Node[] => {
+  const nodes: Node[] = [];
+  let word = 0;
+  for (const piece of text.split(/(\s+)/)) {
+    if (!piece) continue;
+    if (/^\s+$/.test(piece)) {
+      nodes.push(document.createTextNode(piece));
+      continue;
+    }
+    const span = document.createElement("span");
+    span.className = animate ? "wd w" : "wd";
+    span.textContent = piece;
+    if (animate) span.style.animationDelay = `${Math.min(word++, 8) * 18}ms`;
+    nodes.push(span);
+  }
+  return nodes;
+};
+const flow = (element: HTMLElement, next: string): "same" | "grew" | "rewrote" => {
   const before = shown.get(element) ?? "";
-  if (next === before) return;
+  if (next === before) return "same";
   shown.set(element, next);
   if (!before || !next.startsWith(before)) {
-    element.replaceChildren(document.createTextNode(next));
+    element.replaceChildren(...words(next, false));
     if (before && next) {
       element.classList.remove("rewrite");
       void element.offsetWidth; // Restart the fade.
       element.classList.add("rewrite");
     }
+    return "rewrote";
+  }
+  // A word cut mid-stream ("hel" then "hello") is redrawn whole rather than split in two spans.
+  const tail = before.match(/\S+$/)?.[0] ?? "";
+  if (tail && element.lastChild instanceof HTMLElement && element.lastChild.textContent === tail) {
+    element.lastChild.remove();
+    element.append(...words(next.slice(before.length - tail.length), true));
+  } else {
+    element.append(...words(next.slice(before.length), true));
+  }
+  return "grew";
+};
+
+/* ---- Read-along ----
+   The speaker (voice/speaker.rs) reports the sentence being heard and how far into its audio
+   playback is. That sentence is found among the reply's words, and the word at that point —
+   by characters, which tracks speech better than by words — is lit, with everything before it
+   marked as said. Text the reply doesn't contain (fillers, questions read back) is ignored. */
+type Spoken = { text: string; at: number };
+const replyWords = reply.getElementsByClassName("wd") as HTMLCollectionOf<HTMLElement>;
+const norms: string[] = [];
+const norm = (word: string) => word.toLowerCase().replace(/[^\p{L}\p{N}]/gu, "");
+/* Where the next sentence is looked for first: just past the last one found. */
+let cursor = 0;
+let sentence: { text: string; map: number[]; weights: number[] } | null = null;
+let lit = -1;
+let saidThrough = 0;
+let readingTimer = 0;
+
+const syncNorms = () => {
+  if (norms.length > replyWords.length) norms.length = 0;
+  for (let i = norms.length; i < replyWords.length; i++) norms.push(norm(replyWords[i].textContent ?? ""));
+};
+
+/* Each spoken word's place among the reply's words, or null if the sentence isn't in the reply. */
+const locate = (spoken: string[]): number[] | null => {
+  const LOOK = 6;
+  const startsAt = (i: number) => norms[i] === spoken[0] && (spoken.length < 2 || norms.slice(i + 1, i + 1 + LOOK).includes(spoken[1]));
+  let anchor = -1;
+  for (let i = cursor; i < norms.length && anchor < 0; i++) if (startsAt(i)) anchor = i;
+  for (let i = 0; i < Math.min(cursor, norms.length) && anchor < 0; i++) if (startsAt(i)) anchor = i;
+  if (anchor < 0) return null;
+  const map: number[] = [];
+  let next = anchor;
+  for (const word of spoken) {
+    const found = norms.slice(next, next + LOOK).indexOf(word);
+    if (found >= 0) next += found + 1;
+    map.push(Math.max(anchor, next - 1));
+  }
+  return map;
+};
+
+const light = (index: number, said: number) => {
+  if (lit !== index) {
+    replyWords[lit]?.removeAttribute("data-now");
+    replyWords[index]?.setAttribute("data-now", "");
+    lit = index;
+  }
+  if (said !== saidThrough) {
+    for (let i = Math.min(said, saidThrough); i < Math.max(said, saidThrough); i++) replyWords[i]?.toggleAttribute("data-said", i < said);
+    saidThrough = said;
+  }
+};
+
+const resetReading = () => {
+  window.clearTimeout(readingTimer);
+  delete root.dataset.reading;
+  light(-1, 0);
+  sentence = null;
+  cursor = 0;
+};
+
+const onSpoken = (now: Spoken | null) => {
+  window.clearTimeout(readingTimer);
+  if (!now) {
+    // Between sentences: keep the place for a moment, so the next one carries on from it.
+    replyWords[lit]?.removeAttribute("data-now");
+    lit = -1;
+    readingTimer = window.setTimeout(resetReading, 1600);
     return;
   }
-  let word = 0;
-  for (const piece of next.slice(before.length).split(/(\s+)/)) {
-    if (!piece) continue;
-    if (/^\s+$/.test(piece)) {
-      element.append(piece);
-      continue;
+  syncNorms();
+  if (sentence?.text !== now.text) {
+    const spoken = now.text.split(/\s+/).map(norm).filter(Boolean);
+    const map = spoken.length ? locate(spoken) : null;
+    if (!map) {
+      sentence = { text: now.text, map: [], weights: [] };
+      return;
     }
-    const span = document.createElement("span");
-    span.className = "w";
-    span.textContent = piece;
-    span.style.animationDelay = `${Math.min(word++, 8) * 18}ms`;
-    element.append(span);
+    const weights: number[] = [];
+    let total = 0;
+    for (const word of spoken) weights.push((total += word.length + 1));
+    sentence = { text: now.text, map, weights: weights.map((w) => w / total) };
+    cursor = map[map.length - 1] + 1;
   }
+  if (!sentence.map.length) return;
+  let k = sentence.weights.findIndex((w) => w >= now.at);
+  if (k < 0) k = sentence.map.length - 1;
+  root.dataset.reading = "";
+  light(sentence.map[k], sentence.map[k]);
 };
 
 const setLabel = (text: string, control: boolean) => {
@@ -127,6 +230,7 @@ const render = (view: View) => {
   const wasIdle = phase === "idle";
   phase = view.phase;
   root.dataset.phase = view.phase;
+  if (view.phase === "listening") resetReading();
   if (view.phase === "idle") {
     // Keep the old text while the island rises away.
     delete root.dataset.open;
@@ -149,7 +253,14 @@ const render = (view: View) => {
   const working = view.control && (view.phase === "thinking" || view.phase === "transcribing");
   setLabel(working ? CONTROL_LABEL : LABELS[view.phase], working);
   flow(said, view.transcript);
-  flow(reply, replyText);
+  if (flow(reply, replyText) === "rewrote") {
+    // A new reply (or none): start reading along from its top.
+    norms.length = 0;
+    lit = -1;
+    saidThrough = 0;
+    resetReading();
+    stickToEnd = true;
+  }
   status.textContent = view.status ?? "";
   error.textContent = view.error ?? "";
   if (askText.textContent !== (prompt?.text ?? "")) {
@@ -202,10 +313,55 @@ const measure = () => {
   const style = getComputedStyle(inner);
   size.tw = Math.ceil(parseFloat(style.width));
   size.th = Math.ceil(parseFloat(style.height));
-  body.toggleAttribute("data-clipped", body.scrollHeight > body.clientHeight + 1);
+  edges();
   if (phase !== "idle") report({ x: (window.innerWidth - size.tw) / 2, y: ISLAND_TOP, width: size.tw, height: size.th });
 };
 new ResizeObserver(measure).observe(inner);
+
+/* ---- Scrolling ----
+   The body scrolls under the wheel. On its own it follows the voice — the spoken word sits about
+   a third of the way down — or, when Aloe is quiet, the newest text, unless the user scrolled up
+   to reread. A scroll by the user holds the follow for a few seconds. */
+const HOLD_MS = 3500;
+let heldUntil = 0;
+let stickToEnd = true;
+
+const edges = () => {
+  const max = body.scrollHeight - body.clientHeight;
+  body.toggleAttribute("data-clip-top", body.scrollTop > 1);
+  body.toggleAttribute("data-clip-bottom", max - body.scrollTop > 1);
+};
+body.addEventListener("scroll", edges, { passive: true });
+
+const userScrolled = () => {
+  heldUntil = performance.now() + HOLD_MS;
+  requestAnimationFrame(() => {
+    stickToEnd = body.scrollHeight - body.clientHeight - body.scrollTop < 8;
+  });
+};
+body.addEventListener("wheel", userScrolled, { passive: true });
+body.addEventListener("pointerdown", userScrolled, { passive: true });
+body.addEventListener("touchmove", userScrolled, { passive: true });
+
+const follow = (now: number, dt: number) => {
+  const max = body.scrollHeight - body.clientHeight;
+  if (max <= 0 || now < heldUntil) return;
+  let target: number | null = null;
+  const word = replyWords[lit] ?? (saidThrough > 0 ? replyWords[saidThrough - 1] : undefined);
+  if ("reading" in root.dataset && word) target = word.offsetTop - body.clientHeight * 0.33;
+  else if (stickToEnd) target = max;
+  if (target === null) return;
+  target = Math.min(max, Math.max(0, target));
+  const gap = target - body.scrollTop;
+  if (Math.abs(gap) < 1) return;
+  if (reducedMotion.matches) {
+    body.scrollTop = target;
+    return;
+  }
+  // Eased, but at least a pixel a frame so it never stalls on rounding.
+  const step = gap * (1 - Math.exp(-dt / 0.14));
+  body.scrollTop += Math.sign(gap) * Math.min(Math.abs(gap), Math.max(1, Math.abs(step)));
+};
 
 const sizeCanvas = () => {
   const ratio = window.devicePixelRatio || 1;
@@ -311,6 +467,7 @@ const tick = (now: number) => {
   island.style.width = `${size.w.toFixed(1)}px`;
   island.style.height = `${size.h.toFixed(1)}px`;
 
+  follow(now, dt);
   draw(t, dt);
 };
 
@@ -327,8 +484,13 @@ const stop = () => {
   levelTarget = level = 0;
 };
 
-const voiceWindow = window as Window & { __aloeVoice?: (view: View) => void; __aloeVoiceLevel?: (level: number) => void };
+const voiceWindow = window as Window & {
+  __aloeVoice?: (view: View) => void;
+  __aloeVoiceLevel?: (level: number) => void;
+  __aloeVoiceSpoken?: (now: Spoken | null) => void;
+};
 voiceWindow.__aloeVoice = render;
+voiceWindow.__aloeVoiceSpoken = onSpoken;
 voiceWindow.__aloeVoiceLevel = (value) => {
   levelTarget = value;
 };
