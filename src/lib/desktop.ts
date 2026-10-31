@@ -44,20 +44,6 @@ export async function startGoogleAuth(): Promise<void> {
   await openExternal(data.url);
 }
 
-/** Mints a one-time agent setup token from a signed-in user session, so a fresh Google
-    sign-in can pair this device without the user visiting the web app to copy a token. */
-export async function mintAgentSetupToken(userToken: string): Promise<string> {
-  const response = await fetch(`${API_URL}/api/agent/token`, {
-    method: "POST",
-    headers: { Authorization: `Bearer ${userToken}` },
-  });
-  const data = (await response.json().catch(() => ({}))) as { token?: string; error?: string };
-  if (!response.ok || !data.token) {
-    throw new Error(data.error ?? "Failed to register this device");
-  }
-  return data.token;
-}
-
 /** Copy, reporting failure rather than throwing — every caller wants a toast. */
 export async function copyText(value: string): Promise<boolean> {
   try {

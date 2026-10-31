@@ -32,7 +32,7 @@ use tauri_plugin_opener::OpenerExt;
 use tokio_tungstenite::tungstenite::Message;
 
 use config::{
-    debug_log, load_config, make_granted_folder, normalize_setup_token, rescan_folder_contexts,
+    debug_log, load_config, make_granted_folder, rescan_folder_contexts,
     save_config, secret_fingerprint, AppState,
 };
 use models::{AgentConfig, ErrorResponse, PendingApproval, RegisterResponse, SearchMatch};
@@ -202,7 +202,7 @@ fn reset_agent_connection(app: AppHandle, state: State<AppState>) -> Result<Agen
     let mut config = state.config.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
     clear_agent_credentials(
         &mut config,
-        "Connection reset. Paste a fresh setup token from Aloe Integrations.",
+        "Signed out. Sign in again to use Aloe on this computer.",
     );
     save_config(&config)?;
     let result = config.clone();
@@ -215,28 +215,29 @@ fn reset_agent_connection(app: AppHandle, state: State<AppState>) -> Result<Agen
 async fn register_agent(
     app: AppHandle,
     state: State<'_, AppState>,
-    token: String,
+    session_token: String,
 ) -> Result<AgentConfig, String> {
     let config = state.config.lock().unwrap_or_else(std::sync::PoisonError::into_inner).clone();
-    let setup_token = normalize_setup_token(&token);
-    if setup_token.is_empty() {
-        return Err("Setup token is required.".to_string());
+    let session_token = session_token.trim().to_string();
+    if session_token.is_empty() {
+        return Err("Sign in to Aloe first.".to_string());
     }
     debug_log(
         "register",
         "start",
         format!(
-            "api_url={} setupTokenFp={}",
+            "api_url={} sessionFp={}",
             config.api_url,
-            secret_fingerprint(&setup_token)
+            secret_fingerprint(&session_token)
         ),
     );
 
+    // The session the browser just signed in with registers this computer directly.
     let response = state
         .client
         .post(format!("{}/api/agent/register", config.api_url))
+        .bearer_auth(&session_token)
         .json(&json!({
-            "token": setup_token,
             "deviceName": config.device_name,
             "platform": config.platform,
         }))

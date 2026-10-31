@@ -6,7 +6,7 @@ The app is built with Tauri 2, Rust, React 19, Vite, and Bun.
 
 ## Features
 
-- Sign in with Google (through the browser); the device pairs itself to your account.
+- Sign in with Google (through the browser), the same account as the web app.
 - Only chats sent from this app can use the computer. Chats on the Aloe web app never get local tools; the app proves where a chat came from by sending its device credential in `X-Aloe-Agent`.
 - Maintain a websocket connection to the Aloe backend.
 - Grant and revoke local folder access, permanently for the device or temporarily for a single chat.
@@ -76,7 +76,7 @@ bun run tauri:build
 
 1. Open Aloe Desktop.
 2. Click **Continue with Google**. Your browser finishes sign-in and hands the session back over the `aloe://` deep link.
-3. The device registers itself and connects.
+3. Aloe opens, signed in, and connects.
 4. Grant folders that Aloe is allowed to inspect or modify.
 5. Review command approvals from the Desktop controls page when commands are requested.
 

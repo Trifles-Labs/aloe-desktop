@@ -345,7 +345,7 @@ async fn handle_offline_fallback(
     if heartbeat.as_ref().is_ok_and(|r| r.status().as_u16() == 401) {
         let mut cfg = state.config.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         if cfg.credential.as_deref() == Some(credential) {
-            clear_agent_credentials(&mut cfg, "Credential was rejected. Paste a new setup token.");
+            clear_agent_credentials(&mut cfg, "You were signed out. Sign in again to keep using Aloe.");
             let _ = save_config(&cfg);
         }
         drop(cfg);

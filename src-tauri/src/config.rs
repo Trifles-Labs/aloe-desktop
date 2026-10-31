@@ -127,10 +127,6 @@ pub fn default_api_url() -> String {
     normalize_api_url(option_env!("ALOE_BACKEND_URL").unwrap_or(fallback))
 }
 
-pub fn normalize_setup_token(token: &str) -> String {
-    token.chars().filter(|c| !c.is_whitespace()).collect()
-}
-
 pub fn make_default_config() -> AgentConfig {
     AgentConfig {
         api_url: default_api_url(),

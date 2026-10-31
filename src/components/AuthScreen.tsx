@@ -32,9 +32,8 @@ function GoogleIcon({ className }: { className?: string }) {
   );
 }
 
-/* Pairing is sign-in, the way Claude Desktop does it: the browser runs Google,
-   hands the session back over `aloe://`, and this device registers itself.
-   There is no setup token to copy from the web app any more. */
+/* Sign-in, the way any desktop app does it: the browser runs Google and hands
+   the session back over `aloe://`. There is nothing to pair. */
 export function AuthScreen({ onGoogleSignIn, googleConnecting, error }: Props) {
   const reduceMotion = useReducedMotion();
 
@@ -51,13 +50,13 @@ export function AuthScreen({ onGoogleSignIn, googleConnecting, error }: Props) {
             <Leaf className="h-5 w-5" />
           </div>
           <div className="min-w-0">
-            <p className="eyebrow">Get started</p>
-            <p className="mt-0.5 text-lg font-semibold tracking-[-0.01em] text-ink">Sign in to Aloe Desktop</p>
+            <p className="eyebrow">Welcome</p>
+            <p className="mt-0.5 text-lg font-semibold tracking-[-0.01em] text-ink">Sign in to Aloe</p>
           </div>
         </div>
 
         <p className="mt-4 text-[13px] leading-5 text-ink-soft">
-          Your browser opens to finish signing in, then brings you back here. This computer is paired to your account automatically.
+          Your browser opens to finish signing in, then brings you back here.
         </p>
 
         <button

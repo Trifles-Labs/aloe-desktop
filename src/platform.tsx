@@ -23,7 +23,7 @@ let agentCredential: string | null = null;
 
 configureApiClient({
   extraHeaders: (): Record<string, string> => (agentCredential ? { "X-Aloe-Agent": agentCredential } : {}),
-  // A rejected user token must not unpair the device; say so instead of
+  // A rejected user token must not sign the device out; say so instead of
   // redirecting a window that has no /signin page.
   onUnauthorized: () => {
     throw new Error("Your Aloe session was not accepted. Sign out and sign in again.");

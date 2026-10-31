@@ -29,7 +29,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { navigateTo } from "./shims/next-navigation";
 import { DEFAULT_CONFIG } from "./types";
 import type { AgentConfig, CommandTrustMode, PendingApproval } from "./types";
-import { errorMessage, GOOGLE_AUTH_EVENT, mintAgentSetupToken, startGoogleAuth } from "./lib/desktop";
+import { errorMessage, GOOGLE_AUTH_EVENT, startGoogleAuth } from "./lib/desktop";
 import { useDesktopPlatform } from "./platform";
 import { DesktopControlsProvider } from "./settings/DesktopControlsContext";
 import CodeWorkspace from "./code/CodeWorkspace";
@@ -94,7 +94,7 @@ function App() {
   const authenticated = Boolean(config.agentId && config.credential && config.userToken);
 
   /* The deep-link listener lives for the whole window lifetime; this ref lets it
-     ignore a token that arrives after the device is already paired (e.g. a stale
+     ignore a token that arrives after the app is already signed in (e.g. a stale
      browser tab finishing a flow from a previous run). */
   const authenticatedRef = useRef(authenticated);
   authenticatedRef.current = authenticated;
@@ -102,7 +102,7 @@ function App() {
   /* Google tokens are handled once. The browser tab hands the token through
      either the Tauri event (app already open) or the pending-token command
      (app launched by the deep link) — the set keeps the two paths from
-     pairing twice. */
+     registering twice. */
   const handledGoogleTokens = useRef(new Set<string>());
 
   /* The shared web pages read the session token from localStorage, as they do in
@@ -169,7 +169,7 @@ function App() {
     }
   }, [config.userToken]);
 
-  /* Signing out of the shared app unpairs this device; the setup screen takes over. */
+  /* Signing out drops this computer's credential; the sign-in screen takes over. */
   const signOut = useCallback(() => {
     navigateTo("/signin", true);
     void invoke<AgentConfig>("reset_agent_connection").then(setConfig).catch((error) => {
@@ -186,8 +186,8 @@ function App() {
     setAuthError(null);
     try {
       // The browser opens, Google runs there, and the finished session comes
-      // back through the `aloe://` deep link — completeGoogleAuth finishes the
-      // pairing, so the button stays "in progress" until then (or a timeout).
+      // back through the `aloe://` deep link — completeGoogleAuth finishes
+      // signing in, so the button stays "in progress" until then (or a timeout).
       await startGoogleAuth();
     } catch (err) {
       setGoogleConnecting(false);
@@ -195,19 +195,17 @@ function App() {
     }
   };
 
-  /* The session token from the browser is only a login — this device still needs an
-     agent credential. Minting a setup token from the signed-in session and registering
-     with it does exactly what pasting a token from the web app would have done. */
+  /* The browser hands back a session; registering with it gives this computer the
+     credential that lets chats sent from here use its folders and tools. */
   const completeGoogleAuth = useCallback(
     async (token: string) => {
       if (handledGoogleTokens.current.has(token) || authenticatedRef.current) return;
       handledGoogleTokens.current.add(token);
       try {
-        const setupToken = await mintAgentSetupToken(token);
-        const next = await invoke<AgentConfig>("register_agent", { token: setupToken });
+        const next = await invoke<AgentConfig>("register_agent", { sessionToken: token });
         persistUserToken(next);
         setConfig(next);
-        toast("Signed in with Google — this device is paired.", "success");
+        toast("Signed in to Aloe.", "success");
       } catch (err) {
         toast(`Google sign in failed: ${errorMessage(err)}`, "error");
         setAuthError(errorMessage(err));
@@ -251,7 +249,7 @@ function App() {
     try {
       const next = await invoke<AgentConfig>("reset_agent_connection");
       setConfig(next);
-      toast("Logged out. Sign in again to reconnect this computer.", "info");
+      toast("Signed out of Aloe.", "info");
     } catch (err) {
       toast(`Reset failed: ${errorMessage(err)}`, "error");
     }
