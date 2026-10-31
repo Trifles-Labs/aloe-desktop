@@ -107,8 +107,11 @@ pub async fn call(app: &AppHandle, input: &Value, own_window: Option<OwnWindow>,
         }
     }
 
-    let result = request(app, "tools/call", json!({ "name": tool, "arguments": arguments })).await?;
-    let shaped = shape_result(&result)?;
+    let started = std::time::Instant::now();
+    let result = request(app, "tools/call", json!({ "name": tool, "arguments": arguments })).await;
+    let shaped = result.and_then(|result| shape_result(&result));
+    log_call(&tool, &arguments, started.elapsed(), &shaped);
+    let shaped = shaped?;
     if tool == "get_desktop_state" {
         let scale = match (display_width, shaped.get("width").and_then(Value::as_f64)) {
             (Some(display), Some(image)) if image > 0.0 => Some(display as f64 / image),
@@ -117,6 +120,29 @@ pub async fn call(app: &AppHandle, input: &Value, own_window: Option<OwnWindow>,
         *DESKTOP_SCALE.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = scale;
     }
     Ok(shaped)
+}
+
+/// One line per call, so a slow or wandering run can be read back step by step: the tool, what it
+/// aimed at, how long the driver took, and how much came back.
+fn log_call(tool: &str, arguments: &Value, took: Duration, shaped: &Result<Value, String>) {
+    let mut aimed = Vec::new();
+    for key in ["pid", "window_id", "element_token", "since", "query", "include_screenshot", "key", "keys", "direction", "app", "name", "urls"] {
+        if let Some(value) = arguments.get(key) {
+            aimed.push(format!("{key}={value}"));
+        }
+    }
+    if arguments.get("x").is_some() {
+        aimed.push("pixel".to_string());
+    }
+    let outcome = match shaped {
+        Ok(value) => format!(
+            "text_chars={} image={}",
+            value.get("text").and_then(Value::as_str).map_or(0, str::len),
+            value.get("base64").is_some()
+        ),
+        Err(error) => format!("error={:?}", error.chars().take(160).collect::<String>()),
+    };
+    debug_log("cua", "call", format!("{tool} {} ms={} {outcome}", aimed.join(" "), took.as_millis()));
 }
 
 /// The run is over: end its Cua session (dropping its snapshots and agent cursor) so the next run
@@ -174,6 +200,11 @@ fn prepare_arguments(tool: &str, arguments: Value, session: &str) -> Result<Valu
             arguments
                 .entry("max_image_dimension")
                 .or_insert_with(|| json!(SCREENSHOT_MAX_DIMENSION));
+            // A since read checks what an action changed, and the tree diff says that. Leaving the
+            // screenshot out unless asked for keeps it from pushing the last full read's out.
+            if arguments.contains_key("since") {
+                arguments.entry("include_screenshot").or_insert(json!(false));
+            }
             if let Some(timeout) = arguments.get("timeout_ms").and_then(Value::as_u64) {
                 arguments.insert("timeout_ms".to_string(), json!(timeout.min(MAX_TREE_TIMEOUT_MS)));
             }
