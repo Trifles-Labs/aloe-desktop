@@ -1,6 +1,6 @@
 {
   "name": "aloe-desktop",
-  "version": "1.4.16",
+  "version": "1.4.17",
   "private": true,
   "type": "module",
   "scripts": {
@@ -11,7 +11,7 @@
     "build": "tsc --noEmit && vite build"
   },
   "dependencies": {
-    "@aloe/ui": "git+ssh://git@github.com/Trifles-Labs/aloe-ui.git#092113368edc085ebb140d97e757c4d471b95bc0",
+    "@aloe/ui": "git+ssh://git@github.com/Trifles-Labs/aloe-ui.git#292f8473f8196e153201c0a3447d2114697a8b99",
     "@codemirror/lang-css": "6.3.1",
     "@codemirror/lang-html": "6.4.11",
     "@codemirror/lang-javascript": "6.2.4",
