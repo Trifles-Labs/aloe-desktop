@@ -11,7 +11,7 @@
     "build": "tsc --noEmit && vite build"
   },
   "dependencies": {
-    "@aloe/ui": "git+ssh://git@github.com/Trifles-Labs/aloe-ui.git#57bacff64e48e0b7fe07c9eda53335e05a0b70e1",
+    "@aloe/ui": "git+ssh://git@github.com/Trifles-Labs/aloe-ui.git#092113368edc085ebb140d97e757c4d471b95bc0",
     "@codemirror/lang-css": "6.3.1",
     "@codemirror/lang-html": "6.4.11",
     "@codemirror/lang-javascript": "6.2.4",
