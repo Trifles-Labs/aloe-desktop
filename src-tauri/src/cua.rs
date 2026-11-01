@@ -81,6 +81,13 @@ static SESSION: Mutex<Option<String>> = Mutex::new(None);
 /// Screen pixels per pixel of the last `get_desktop_state` image, for mapping desktop-scope points
 /// onto Aloe's window rectangle.
 static DESKTOP_SCALE: Mutex<Option<f64>> = Mutex::new(None);
+/// The session that has been started with Aloe's cursor theme in the running driver. Cleared when
+/// the driver (re)starts, since its sessions go with it.
+static THEMED_SESSION: Mutex<Option<String>> = Mutex::new(None);
+
+/// Aloe's agent-cursor theme, built by scripts/build_cursor_theme.ts and bundled next to the driver.
+const CURSOR_THEME_ID: &str = "app.aloe.cursor";
+const CURSOR_THEME_FILE: &str = "aloe.cua-theme";
 
 /// What the own-window guards need to know about Aloe's main window, in physical screen pixels.
 #[derive(Clone, Copy)]
@@ -97,7 +104,8 @@ pub struct OwnWindow {
 pub async fn call(app: &AppHandle, input: &Value, own_window: Option<OwnWindow>, display_width: Option<i32>) -> Result<Value, String> {
     let tool = input.get("tool").and_then(Value::as_str).ok_or("tool is required")?.to_string();
     let arguments = input.get("arguments").cloned().unwrap_or_else(|| json!({}));
-    let mut arguments = prepare_arguments(&tool, arguments, &session_label())?;
+    let session = session_label();
+    let mut arguments = prepare_arguments(&tool, arguments, &session)?;
     guard_own_process(&arguments)?;
     guard_desktop_scope(&tool, &arguments, own_window)?;
     if let Some(urls) = arguments.get_mut("urls").and_then(Value::as_array_mut) {
@@ -107,6 +115,7 @@ pub async fn call(app: &AppHandle, input: &Value, own_window: Option<OwnWindow>,
         }
     }
 
+    apply_cursor_theme(app, &session).await;
     let started = std::time::Instant::now();
     let result = request(app, "tools/call", json!({ "name": tool, "arguments": arguments })).await;
     let shaped = result.and_then(|result| shape_result(&result));
@@ -152,6 +161,7 @@ pub async fn end_run(app: &AppHandle) {
         return;
     };
     *DESKTOP_SCALE.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = None;
+    THEMED_SESSION.lock().unwrap_or_else(std::sync::PoisonError::into_inner).take();
     if DRIVER.lock().await.is_none() {
         return;
     }
@@ -170,6 +180,24 @@ pub async fn shutdown() {
     SESSION.lock().unwrap_or_else(std::sync::PoisonError::into_inner).take();
     if let Some(mut driver) = DRIVER.lock().await.take() {
         let _ = driver.child.kill().await;
+    }
+}
+
+/// Starts the run's session with Aloe's cursor theme before its first action, so the agent cursor
+/// never flashes Cua's default. Best-effort: a missing theme leaves the default cursor, and the
+/// action still runs.
+async fn apply_cursor_theme(app: &AppHandle, session: &str) {
+    let themed = |slot: &Option<String>| slot.as_deref() == Some(session);
+    if themed(&THEMED_SESSION.lock().unwrap_or_else(std::sync::PoisonError::into_inner)) {
+        return;
+    }
+    let arguments = json!({ "session": session, "cursor_theme": { "theme_id": CURSOR_THEME_ID, "reduced_motion": "auto" } });
+    match request(app, "tools/call", json!({ "name": "start_session", "arguments": arguments })).await {
+        Ok(result) if !result.get("isError").and_then(Value::as_bool).unwrap_or(false) => {
+            *THEMED_SESSION.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some(session.to_string());
+        }
+        Ok(result) => debug_log("cua", "cursor_theme_refused", result.to_string().chars().take(200).collect::<String>()),
+        Err(error) => debug_log("cua", "cursor_theme_failed", error),
     }
 }
 
@@ -390,12 +418,44 @@ fn driver_path(app: &AppHandle) -> Result<PathBuf, String> {
     }
 }
 
+/// Copies the bundled cursor theme into the driver's theme store. Installing is local-only and
+/// never an agent tool, so it runs as its own short-lived command; it overwrites, so a newer Aloe
+/// replaces an older theme. Best-effort: without it the cursor falls back to Cua's default.
+async fn install_cursor_theme(app: &AppHandle, driver: &PathBuf) {
+    let theme = match app.path().resource_dir() {
+        Ok(dir) => dir.join("aloe-cursor").join(CURSOR_THEME_FILE),
+        Err(error) => return debug_log("cua", "cursor_theme_missing", error.to_string()),
+    };
+    if !theme.is_file() {
+        return debug_log("cua", "cursor_theme_missing", theme.display().to_string());
+    }
+    let mut command = Command::new(driver);
+    command
+        .arg("cursor-theme")
+        .arg("install")
+        .arg(&theme)
+        .env("DO_NOT_TRACK", "1")
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .kill_on_drop(true);
+    hide_command_window(&mut command);
+    match tokio::time::timeout(Duration::from_secs(10), command.status()).await {
+        Ok(Ok(status)) if status.success() => {}
+        Ok(Ok(status)) => debug_log("cua", "cursor_theme_install_failed", status.to_string()),
+        Ok(Err(error)) => debug_log("cua", "cursor_theme_install_failed", error.to_string()),
+        Err(_) => debug_log("cua", "cursor_theme_install_failed", "timed out"),
+    }
+}
+
 async fn start(app: &AppHandle) -> Result<Driver, String> {
     let path = driver_path(app)?;
+    install_cursor_theme(app, &path).await;
+    *THEMED_SESSION.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = None;
     let mut command = Command::new(&path);
-    // Aloe never shows Cua's own agent-cursor overlay: the desktop-control glow and pill are the
-    // only indicator, and a second pointer was confused with the user's real one.
-    command.arg("mcp").arg("--no-overlay");
+    // Cua's agent cursor shows where Aloe is acting, drawn in Aloe's own theme (see
+    // apply_cursor_theme) so it reads as Aloe's rather than a second copy of the user's pointer.
+    command.arg("mcp");
     // Bare `mcp` on macOS proxies to a separately installed CuaDriver.app; --direct keeps the
     // runtime in this child, so Accessibility and Screen Recording are Aloe Desktop's grants.
     if cfg!(target_os = "macos") {

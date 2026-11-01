@@ -1,7 +1,7 @@
 {
     "$schema": "https://schema.tauri.app/config/2",
     "productName": "Aloe Desktop",
-    "version": "1.4.17",
+    "version": "1.4.18",
     "identifier": "com.aloe.desktop",
     "build": {
         "beforeDevCommand": "bun run dev",
@@ -40,7 +40,8 @@
             "icons/icon.ico"
         ],
         "resources": {
-            "resources/cua-driver/": "cua-driver/"
+            "resources/cua-driver/": "cua-driver/",
+            "resources/aloe-cursor/aloe.cua-theme": "aloe-cursor/aloe.cua-theme"
         }
     },
     "plugins": {
