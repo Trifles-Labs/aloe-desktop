@@ -107,11 +107,15 @@ export default function CodeWorkspace({ config, pendingCount, onAddProject }: Pr
     setDraftProject(projects[0]?.path ?? null);
   }, [draftProject, isGranted, projects]);
 
-  const activeSession = sessionId ? sessions[sessionId] ?? null : null;
-  /* A session the server knows is Code but this device has no project for: started on
-     another computer, or before a reinstall cleared local storage. Its project is a
-     path on some disk, so it has to be chosen here rather than guessed. */
-  const unassigned = Boolean(sessionId && !activeSession && conversations.some((conversation) => conversation.id === sessionId && conversation.workspace === "code"));
+  const sessionConversation = sessionId ? conversations.find((conversation) => conversation.id === sessionId) : undefined;
+  /* The session's project: recorded when it started, or read back from its file on this computer. */
+  const activeSession = sessionId
+    ? sessions[sessionId] ?? (sessionConversation?.projectPath ? { conversationId: sessionId, projectPath: sessionConversation.projectPath, createdAt: sessionConversation.createdAt.toISOString() } : null)
+    : null;
+  /* A Code session with no project on this device (an older one the server stored, started on
+     another computer or before a reinstall). Its project is a path on some disk, so it has to be
+     chosen here rather than guessed. */
+  const unassigned = Boolean(sessionId && !activeSession && sessionConversation?.workspace === "code");
   const activeProject = activeSession?.projectPath ?? (unassigned ? null : draftProject);
   const projectReady = Boolean(activeProject && isGranted(activeProject));
   const branch = useProjectBranch(projectReady ? activeProject : null);
@@ -212,11 +216,12 @@ export default function CodeWorkspace({ config, pendingCount, onAddProject }: Pr
     const inProject: SidebarSession[] = [];
     const orphans: SidebarSession[] = [];
     for (const conversation of conversations) {
-      const session = sessions[conversation.id];
-      if (!session && conversation.workspace !== "code") continue;
+      // Sessions live on this computer now; older ones the server stored are no longer listed.
+      if (conversation.storage !== "device") continue;
+      const projectPath = sessions[conversation.id]?.projectPath ?? conversation.projectPath;
       const item = { id: conversation.id, title: stripHiddenContext(conversation.title) || "New session", createdAt: conversation.createdAt };
-      if (!session) orphans.push(item);
-      else if (session.projectPath === activeProject) inProject.push(item);
+      if (!projectPath) orphans.push(item);
+      else if (projectPath === activeProject) inProject.push(item);
     }
     const newestFirst = (a: SidebarSession, b: SidebarSession) => b.createdAt.getTime() - a.createdAt.getTime();
     return { projectSessions: inProject.sort(newestFirst), unassignedSessions: orphans.sort(newestFirst) };

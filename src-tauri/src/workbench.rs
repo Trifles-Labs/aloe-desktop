@@ -68,7 +68,7 @@ pub fn write_text(config: &AgentConfig, path: &str, content: &str) -> Result<(),
 }
 
 /// Written beside the file and renamed over it, so a crash mid-save never leaves half a file.
-fn write_atomically(file: &Path, content: &str) -> Result<(), String> {
+pub(crate) fn write_atomically(file: &Path, content: &str) -> Result<(), String> {
     let name = file.file_name().ok_or("Path has no file name.")?.to_string_lossy();
     let temp = file.with_file_name(format!(".{name}.aloe-save"));
     fs::write(&temp, content).map_err(|e| e.to_string())?;

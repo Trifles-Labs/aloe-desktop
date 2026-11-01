@@ -9,10 +9,12 @@ import { useCallback, useMemo, useRef, useState } from "react";
 import { Monitor } from "lucide-react";
 
 import { configureApiClient } from "@aloe/ui/lib/api";
+import { isLocalChatId } from "@aloe/ui/lib/local_code_chats";
 import type { Platform } from "@aloe/ui/lib/platform";
 import type { User } from "@aloe/ui/lib/types";
 import ConversationFolders from "./components/ConversationFolders";
 import DesktopConnectModal from "./components/DesktopConnectModal";
+import { localCodeStore } from "./code/chatStore";
 import { isCodeSession } from "./code/sessions";
 import DesktopAppPane from "./settings/DesktopAppPane";
 import type { AgentConfig } from "./types";
@@ -58,7 +60,9 @@ export function useDesktopPlatform(config: AgentConfig, onSignOut: () => void) {
       onSignOut: signOut,
       interceptOAuthConnect,
       // Aloe Code sessions are listed in Code mode, by project.
-      hideConversation: isCodeSession,
+      hideConversation: (id) => isCodeSession(id) || isLocalChatId(id),
+      // ...and kept only on this computer; the server stores none of them.
+      codeStore: localCodeStore,
     }),
     [readStoredUser, signOut, interceptOAuthConnect],
   );

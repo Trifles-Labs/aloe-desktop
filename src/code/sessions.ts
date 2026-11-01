@@ -1,9 +1,9 @@
 /* Which conversations are Aloe Code sessions, and the project each one works in.
  *
- * The backend has no notion of a coding session — a session is an ordinary
- * conversation whose messages carry the project as hidden context — so the
- * mapping lives on this device. It is per-machine by nature anyway: a project
- * is a path on this disk. */
+ * A session lives on this computer (chatStore.ts): its file also records its project, and that is
+ * the fallback when this map has lost an entry. The map stays the first answer, and the only one
+ * for older sessions the server stored. It is per-machine by nature anyway: a project is a path on
+ * this disk. */
 
 import { useSyncExternalStore } from "react";
 

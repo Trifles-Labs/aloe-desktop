@@ -1,5 +1,6 @@
 mod browser;
 mod changes;
+mod code_chats;
 mod code_tools;
 mod computer;
 mod config;
@@ -577,6 +578,33 @@ fn code_revert_file(state: State<AppState>, conversation_id: String, path: Strin
     changes::revert_file(&device_config(&state), &conversation_id, &path)
 }
 
+// ── Aloe Code sessions kept on this computer (code_chats.rs) ──────────────────
+// Off the main thread: a session file carries every tool result and can run to megabytes.
+
+async fn blocking<T: Send + 'static>(work: impl FnOnce() -> Result<T, String> + Send + 'static) -> Result<T, String> {
+    tauri::async_runtime::spawn_blocking(work).await.map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+async fn code_chats_list() -> Result<Vec<serde_json::Value>, String> {
+    blocking(code_chats::list).await
+}
+
+#[tauri::command]
+async fn code_chat_get(id: String) -> Result<Option<serde_json::Value>, String> {
+    blocking(move || code_chats::get(&id)).await
+}
+
+#[tauri::command]
+async fn code_chat_save(chat: serde_json::Value) -> Result<(), String> {
+    blocking(move || code_chats::save(&chat)).await
+}
+
+#[tauri::command]
+async fn code_chat_delete(id: String) -> Result<(), String> {
+    blocking(move || code_chats::remove(&id)).await
+}
+
 fn assert_terminal_granted(state: &AppState, session_id: &str) -> Result<(), String> {
     let cwd = terminal::session_cwd(state, session_id).ok_or_else(|| format!("Terminal session not found: {session_id}"))?;
     fs::assert_granted(&device_config(state), &cwd).map(|_| ())
@@ -749,6 +777,10 @@ pub fn run() {
             add_project_folder,
             code_session_changes,
             code_revert_file,
+            code_chats_list,
+            code_chat_get,
+            code_chat_save,
+            code_chat_delete,
             code_terminal_sessions,
             code_terminal_read,
             code_terminal_stop,
