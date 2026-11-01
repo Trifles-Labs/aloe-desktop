@@ -12,6 +12,7 @@ mod models;
 mod notifications;
 mod overlay;
 mod project;
+mod screen_grid;
 mod search;
 mod shell;
 mod socket;
@@ -415,6 +416,24 @@ fn voice_overlay_island(rect: Option<voice::overlay::Rect>) {
     voice::overlay::set_island(rect);
 }
 
+/// Where the drawing's clear chip is, so it can take the cursor too.
+#[tauri::command]
+fn voice_overlay_chip(rect: Option<voice::overlay::Rect>) {
+    voice::overlay::set_chip(rect);
+}
+
+/// The clear chip: takes away every mark Aloe drew over the screen.
+#[tauri::command]
+fn voice_clear_drawing(app: tauri::AppHandle) {
+    voice::drawing::clear(&app);
+}
+
+/// The marks a freshly loaded voice overlay page should draw.
+#[tauri::command]
+fn voice_overlay_drawing() -> voice::drawing::Drawing {
+    voice::drawing::current()
+}
+
 /// What a freshly loaded voice overlay page should show.
 #[tauri::command]
 fn voice_overlay_state() -> voice::overlay::View {
@@ -689,6 +708,9 @@ pub fn run() {
             voice_stop,
             voice_overlay_state,
             voice_overlay_island,
+            voice_overlay_chip,
+            voice_clear_drawing,
+            voice_overlay_drawing,
             voice_hotkey_allowed,
             sync_folders,
             add_folder,

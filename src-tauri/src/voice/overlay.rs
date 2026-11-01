@@ -10,7 +10,9 @@
 //!
 //! The window covers the display but is click-through everywhere except the island: the page
 //! reports the island's rectangle, and a watcher lets the window take the cursor only while the
-//! pointer is over it.
+//! pointer is over it. Marks Aloe draws over the screen (drawing.rs) go on the same page, with a
+//! small chip to clear them that is clickable the same way, and they keep the watcher running
+//! after the island has gone.
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
@@ -21,7 +23,7 @@ use tauri::{AppHandle, Manager, WebviewUrl, WebviewWindow, WebviewWindowBuilder}
 
 use crate::config::{debug_log, AppState};
 
-const STAGE_LABEL: &str = "voice-stage";
+pub(crate) const STAGE_LABEL: &str = "voice-stage";
 /// How often the pointer is checked against the island while the overlay shows.
 const HIT_INTERVAL: Duration = Duration::from_millis(30);
 
@@ -91,6 +93,8 @@ static VIEW: Mutex<Option<View>> = Mutex::new(None);
 static STAGE: Mutex<Option<Stage>> = Mutex::new(None);
 static WATCHING: AtomicBool = AtomicBool::new(false);
 static ISLAND: Mutex<Option<Rect>> = Mutex::new(None);
+/// The drawing's clear chip, while there are marks on screen.
+static CHIP: Mutex<Option<Rect>> = Mutex::new(None);
 /// Cleared while Aloe itself clicks, so a synthetic click at the top of the screen reaches the
 /// app beneath rather than the island.
 static CLICKABLE: AtomicBool = AtomicBool::new(true);
@@ -117,6 +121,33 @@ pub fn set_island(rect: Option<Rect>) {
     *ISLAND.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = rect;
 }
 
+/// The page's clear chip moved, appeared or went (`None`).
+pub fn set_chip(rect: Option<Rect>) {
+    *CHIP.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = rect;
+}
+
+/// Marks went up or all came down: keep the pointer watcher running for the chip while they show,
+/// and once neither they nor the island are up, hand every click back to the apps beneath.
+pub fn drawing_changed(app: &AppHandle, showing: bool) {
+    if showing {
+        if !WATCHING.swap(true, Ordering::SeqCst) {
+            watch_pointer(app.clone());
+        }
+    } else {
+        set_chip(None);
+        if !is_showing() {
+            release_pointer(app);
+        }
+    }
+}
+
+fn release_pointer(app: &AppHandle) {
+    WATCHING.store(false, Ordering::SeqCst);
+    if let Some(window) = app.get_webview_window(STAGE_LABEL) {
+        let _ = window.set_ignore_cursor_events(true);
+    }
+}
+
 /// The current view, for a page that loaded after it was last pushed.
 pub fn current() -> View {
     VIEW.lock().unwrap_or_else(std::sync::PoisonError::into_inner).clone().unwrap_or_default()
@@ -128,6 +159,10 @@ pub fn show(app: &AppHandle, view: View) {
     if was_showing != is_showing() {
         // The island takes over (or hands back) the desktop-control pill.
         crate::overlay::sync_windows(app);
+    }
+    if was_showing && !is_showing() {
+        // Marks belong to the answer they were drawn for: they fade with it.
+        super::drawing::clear(app);
     }
 }
 
@@ -145,10 +180,9 @@ fn render(app: &AppHandle, mut view: View) {
         let _ = window.eval(&format!("window.__aloeVoice?.({json})"));
     }
     if idle {
-        WATCHING.store(false, Ordering::SeqCst);
         set_island(None);
-        if let Some(window) = app.get_webview_window(STAGE_LABEL) {
-            let _ = window.set_ignore_cursor_events(true);
+        if !super::drawing::is_showing() {
+            release_pointer(app);
         }
     } else if !WATCHING.swap(true, Ordering::SeqCst) {
         watch_pointer(app.clone());
@@ -175,18 +209,21 @@ pub fn spoken(app: &AppHandle, now: Option<(&str, f32)>) {
     }
 }
 
-/// Lets the stage take the cursor only while the pointer is over the island, until the overlay
-/// goes idle. A thread of its own: reading the pointer waits on the event loop, so it must not run
+/// Lets the stage take the cursor only while the pointer is over the island or the drawing's clear
+/// chip, until the overlay goes idle with nothing drawn. A thread of its own: reading the pointer waits on the event loop, so it must not run
 /// on it or on the async workers.
 fn watch_pointer(app: AppHandle) {
     std::thread::spawn(move || {
         let mut taking = false;
         while WATCHING.load(Ordering::SeqCst) {
-            let over = match (app.cursor_position(), *STAGE.lock().unwrap_or_else(std::sync::PoisonError::into_inner), *ISLAND.lock().unwrap_or_else(std::sync::PoisonError::into_inner)) {
-                (Ok(pointer), Some(stage), Some(island)) => {
+            let island = *ISLAND.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+            let chip = *CHIP.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+            let over = match (app.cursor_position(), *STAGE.lock().unwrap_or_else(std::sync::PoisonError::into_inner)) {
+                (Ok(pointer), Some(stage)) => {
                     let x = (pointer.x - stage.x) / stage.scale;
                     let y = (pointer.y - stage.y) / stage.scale;
-                    x >= island.x && y >= island.y && x < island.x + island.width && y < island.y + island.height
+                    let inside = |r: Rect| x >= r.x && y >= r.y && x < r.x + r.width && y < r.y + r.height;
+                    island.is_some_and(inside) || chip.is_some_and(inside)
                 }
                 _ => false,
             };
@@ -212,8 +249,29 @@ pub fn prepare(app: &AppHandle) {
     }
 }
 
+/// Like `prepare`, but on the primary display: the one the voice turn's screenshot shows, which
+/// marks drawn over the screen must line up with. Blocking, like `prepare`.
+pub fn prepare_primary(app: &AppHandle) {
+    let placed = app
+        .primary_monitor()
+        .map_err(|e| e.to_string())
+        .and_then(|monitor| monitor.ok_or_else(|| "No display.".to_string()))
+        .and_then(|monitor| place_on(app, &monitor));
+    if let Err(error) = placed {
+        debug_log("voice", "overlay_error", error);
+    }
+}
+
 fn place_window(app: &AppHandle) -> Result<(), String> {
-    let monitor = monitor_under_pointer(app)?;
+    // Marks on screen pin the overlay to the display they were drawn for.
+    if super::drawing::is_showing() {
+        let primary = app.primary_monitor().map_err(|e| e.to_string())?.ok_or_else(|| "No display.".to_string())?;
+        return place_on(app, &primary);
+    }
+    place_on(app, &monitor_under_pointer(app)?)
+}
+
+fn place_on(app: &AppHandle, monitor: &tauri::Monitor) -> Result<(), String> {
     let scale = monitor.scale_factor();
     let (position, size) = (monitor.position(), monitor.size());
     *STAGE.lock().unwrap_or_else(std::sync::PoisonError::into_inner) =

@@ -445,8 +445,11 @@ async fn run_tool(
         "wait_terminal_session"  => wait_terminal_session(state, job.input.clone()).await,
         "open_local_url"         => open_local_url(&job.input).await,
         "capture_desktop_screenshot" => capture_desktop_screenshot(app).await,
+        "capture_screen_region"  => crate::computer::capture_screen_region(&job.input).await,
         "get_editor_context"     => get_editor_context(config, &job.input).await,
         "show_notification"      => show_notification(app, &job.input).await,
+        // Marks over the screen during a voice reply (voice/drawing.rs).
+        "draw_on_screen"         => crate::voice::drawing::apply(app, &job.input).await,
         // Deprecated (see browser.rs): kept for backends that still dispatch browser_ jobs.
         // Self-contained (its own Chrome process and CDP connection), so it needs neither config
         // nor AppState.

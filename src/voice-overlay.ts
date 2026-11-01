@@ -1,5 +1,6 @@
 import "@fontsource-variable/instrument-sans";
 import { invoke } from "@tauri-apps/api/core";
+import "./voice-drawing";
 
 /* The push-to-talk overlay (voice.html). No React, like overlay.ts: voice/overlay.rs owns the
    state and pushes it in whole with window.eval; this renders it, and runs one animation loop

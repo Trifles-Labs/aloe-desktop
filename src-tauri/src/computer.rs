@@ -199,6 +199,69 @@ fn capture(geometry: Option<ScreenGeometry>) -> Result<Value, String> {
     }))
 }
 
+/// Shortest a region's longest side is shown at: a small crop is enlarged, so what is in it (and a
+/// grid's labels) is big enough for the model to read.
+const REGION_MIN_DIMENSION: f64 = 768.0;
+/// Numbers the dev-build copies of located regions, which rotate through a dozen files.
+static LOCATE_SHOTS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+/// Part of the primary display at its own resolution: `{ x, y, w, h }` on the 0–1000 grid of the
+/// full screenshot, optionally with a numbered grid drawn over it (`grid: { cols, rows }`, see
+/// screen_grid.rs). For the backend to find something exactly before drawing a mark on it (see
+/// voice/drawing.rs), where the downscaled full screenshot is too coarse to place it.
+pub async fn capture_screen_region(input: &Value) -> Result<Value, String> {
+    let field = |name: &str| input.get(name).and_then(Value::as_f64).filter(|n| n.is_finite());
+    let (Some(x), Some(y), Some(w), Some(h)) = (field("x"), field("y"), field("w"), field("h")) else {
+        return Err("x, y, w and h are required.".to_string());
+    };
+    let grid = input.get("grid").and_then(|grid| {
+        let count = |name: &str| grid.get(name).and_then(Value::as_u64).map(|n| n as u32);
+        Some((count("cols")?, count("rows")?))
+    });
+    tauri::async_runtime::spawn_blocking(move || {
+        let monitors = Monitor::all().map_err(|e| format!("Could not list displays: {e}"))?;
+        let monitor = monitors.iter().find(|m| m.is_primary()).or_else(|| monitors.first()).ok_or_else(|| "No display found.".to_string())?;
+        let captured = monitor.capture_image().map_err(|e| format!("Screen capture failed: {e}.{}", permission_hint()))?;
+        let (full_w, full_h) = captured.dimensions();
+        let to_px = |grid: f64, size: u32| ((grid.clamp(0.0, GRID) / GRID) * size as f64).round() as u32;
+        let (left, top) = (to_px(x, full_w).min(full_w - 1), to_px(y, full_h).min(full_h - 1));
+        let width = to_px(x + w, full_w).saturating_sub(left).clamp(1, full_w - left);
+        let height = to_px(y + h, full_h).saturating_sub(top).clamp(1, full_h - top);
+        let rgb = DynamicImage::ImageRgba8(captured).crop_imm(left, top, width, height).to_rgb8();
+        let largest = width.max(height) as f64;
+        let scale = (largest.max(REGION_MIN_DIMENSION).min(SCREENSHOT_MAX_DIMENSION as f64)) / largest;
+        let mut rgb = if (scale - 1.0).abs() > 0.01 {
+            imageops::resize(&rgb, ((width as f64 * scale).round() as u32).max(1), ((height as f64 * scale).round() as u32).max(1), FilterType::Triangle)
+        } else {
+            rgb
+        };
+        if let Some((cols, rows)) = grid {
+            crate::screen_grid::draw(&mut rgb, cols, rows);
+        }
+        let mut jpeg = Vec::new();
+        JpegEncoder::new_with_quality(&mut jpeg, SCREENSHOT_JPEG_QUALITY).encode_image(&rgb).map_err(|e| format!("Could not encode the screenshot: {e}"))?;
+        if cfg!(debug_assertions) {
+            // Dev builds keep what the model was shown, to see why a mark landed where it did.
+            let path = std::env::temp_dir().join(format!("aloe-locate-{}.jpg", LOCATE_SHOTS.fetch_add(1, std::sync::atomic::Ordering::SeqCst) % 12));
+            if std::fs::write(&path, &jpeg).is_ok() {
+                crate::config::debug_log("voice", "locate_shot", format!("{} grid={grid:?} region=({x:.0},{y:.0},{w:.0},{h:.0})", path.display()));
+            }
+        }
+        // The region actually captured, after rounding to whole pixels, so points on the crop map
+        // back onto the grid exactly.
+        let grid = |px: u32, size: u32| px as f64 / size as f64 * GRID;
+        Ok(json!({
+            "mimeType": "image/jpeg",
+            "base64": BASE64.encode(&jpeg),
+            "width": rgb.width(),
+            "height": rgb.height(),
+            "region": { "x": grid(left, full_w), "y": grid(top, full_h), "w": grid(width, full_w), "h": grid(height, full_h) },
+        }))
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
 pub async fn capture_desktop_screenshot(app: &AppHandle) -> Result<Value, String> {
     on_input_thread(app, || {
         let geometry = new_enigo().and_then(|enigo| display_geometry(&enigo)).ok();

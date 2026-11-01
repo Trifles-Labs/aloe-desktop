@@ -14,6 +14,9 @@
 //!    the prompt is read out and answered by voice (prompts.rs). If the reply ends by asking
 //!    something, Aloe listens for the answer without a key press.
 //!
+//! 5. Aloe can draw over the screen while it answers (drawing.rs): highlights, circles, arrows
+//!    and labels, which stay until the next thing said, Esc or the ✕.
+//!
 //! Earcons mark each step for someone who can't see the glow. One session at a time: talking
 //! again interrupts whatever Aloe is saying or doing, except while it is waiting for an answer,
 //! when talking *is* the answer. Every async piece belongs to a generation, and a piece from an
@@ -21,6 +24,7 @@
 
 pub mod audio;
 mod backend;
+pub mod drawing;
 mod latency;
 pub mod hotkey;
 pub mod overlay;
@@ -280,6 +284,8 @@ async fn handle(app: &AppHandle, speaker: &Speaker, session: &mut Session, comma
             Command::Hotkey(HotkeyEvent::Escape) => {
                 if overlay::current().phase != Phase::Idle || speaker.is_busy() {
                     dismiss_all(&app, speaker, session);
+                } else {
+                    drawing::clear(&app);
                 }
             }
             Command::Dismiss => dismiss_all(&app, speaker, session),
@@ -289,6 +295,7 @@ async fn handle(app: &AppHandle, speaker: &Speaker, session: &mut Session, comma
 
 fn dismiss_all(app: &AppHandle, speaker: &Speaker, session: &mut Session) {
     new_generation(session, speaker);
+    drawing::clear(app);
     overlay::show(app, View::default());
 }
 
@@ -470,6 +477,10 @@ async fn listen(app: &AppHandle, speaker: &Speaker, generation: u64, purpose: Pu
         }
     };
     let fresh = matches!(purpose, Purpose::Chat { follow_up: false });
+    if fresh {
+        // Something new to talk about: the last answer's marks would point at the wrong things.
+        drawing::clear(app);
+    }
     let answering = matches!(purpose, Purpose::Answer(_));
     update(app, generation, |view| {
         if fresh {
