@@ -25,3 +25,19 @@
 h1, h2, h3, h4, .font-display {
   font-optical-sizing: auto;
 }
+
+/* The voice tour's "thinking" label, matching the shimmer on the real overlay (voice.html). */
+.voice-intro-shimmer {
+  background: linear-gradient(90deg, rgb(244 247 240 / 0.62) 30%, #f4f7f0 50%, rgb(244 247 240 / 0.62) 70%) 0 0 / 300% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  animation: voice-intro-shimmer 1.6s linear infinite;
+}
+@keyframes voice-intro-shimmer {
+  from { background-position: 100% 0; }
+  to { background-position: 0 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .voice-intro-shimmer { animation: none; color: rgb(244 247 240 / 0.8); background: none; }
+}

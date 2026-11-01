@@ -19,11 +19,13 @@ use std::sync::Mutex;
 use std::time::Duration;
 
 use serde::Serialize;
-use tauri::{AppHandle, Manager, WebviewUrl, WebviewWindow, WebviewWindowBuilder};
+use tauri::{AppHandle, Emitter, Manager, WebviewUrl, WebviewWindow, WebviewWindowBuilder};
 
 use crate::config::{debug_log, AppState};
 
 pub(crate) const STAGE_LABEL: &str = "voice-stage";
+/// The floating voice tour window (open_voice_intro in lib.rs), told about each phase change.
+pub(crate) const INTRO_LABEL: &str = "voice-intro";
 /// How often the pointer is checked against the island while the overlay shows.
 const HIT_INTERVAL: Duration = Duration::from_millis(30);
 
@@ -175,7 +177,12 @@ fn render(app: &AppHandle, mut view: View) {
     }
     let json = serde_json::to_string(&view).unwrap_or_else(|_| "{}".to_string());
     let idle = view.phase == Phase::Idle;
-    *VIEW.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some(view);
+    let phase = view.phase;
+    let previous = VIEW.lock().unwrap_or_else(std::sync::PoisonError::into_inner).replace(view).map(|last| last.phase);
+    if previous != Some(phase) {
+        // The voice tour's last step (VoiceIntro.tsx) waits for a real "listening" to say well done.
+        let _ = app.emit_to(INTRO_LABEL, "voice-phase", phase);
+    }
     if let Some(window) = app.get_webview_window(STAGE_LABEL) {
         let _ = window.eval(&format!("window.__aloeVoice?.({json})"));
     }

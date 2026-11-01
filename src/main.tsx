@@ -11,6 +11,7 @@ import { ButterflyDecor } from "./components/ButterflyDecor";
 import { AuthScreen } from "./components/AuthScreen";
 import { DesktopTitleBar } from "./components/DesktopTitleBar";
 import { UpdateBanner } from "./components/UpdateBanner";
+import { VoiceIntroLauncher } from "./components/VoiceIntro";
 import { ThemeProvider } from "next-themes";
 import Providers from "@aloe/ui/providers";
 import AppLayout from "@aloe/ui/pages/AppLayout";
@@ -344,6 +345,7 @@ function App() {
               <Providers>
                 <DesktopRouter codePage={<CodeWorkspace config={config} pendingCount={pending.length} onAddProject={addProject} />} />
                 {overlay}
+                <VoiceIntroLauncher platform={config.platform} />
               </Providers>
             </DesktopControlsProvider>
           </PlatformProvider>

@@ -1,0 +1,18 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Meet Aloe voice</title>
+    <style>
+      /* The window is transparent (lib.rs, open_voice_intro): only the card is painted, so the
+         page itself must stay see-through whatever the theme sets on body. */
+      html, body, #root { margin: 0; height: 100%; background: transparent !important; overflow: hidden; }
+      body { user-select: none; -webkit-user-select: none; }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/intro.tsx"></script>
+  </body>
+</html>

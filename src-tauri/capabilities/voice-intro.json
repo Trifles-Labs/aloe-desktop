@@ -1,0 +1,12 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "voice-intro",
+  "description": "The floating voice tour window (open_voice_intro in lib.rs): hear the voice phase, drag the card, close itself.",
+  "windows": ["voice-intro"],
+  "permissions": [
+    "core:event:default",
+    "core:window:allow-start-dragging",
+    "core:window:allow-internal-toggle-maximize",
+    "core:window:allow-close"
+  ]
+}

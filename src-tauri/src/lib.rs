@@ -440,6 +440,32 @@ fn voice_overlay_state() -> voice::overlay::View {
     voice::overlay::current()
 }
 
+/// The voice tour (intro.html): a frameless, transparent window centred on the screen, floating
+/// over whatever is open. A second call brings the open one forward. Async because building a
+/// window from a synchronous command deadlocks on Windows.
+#[tauri::command]
+async fn open_voice_intro(app: AppHandle) -> Result<(), String> {
+    if let Some(window) = app.get_webview_window(voice::overlay::INTRO_LABEL) {
+        let _ = window.unminimize();
+        let _ = window.set_focus();
+        return Ok(());
+    }
+    tauri::WebviewWindowBuilder::new(&app, voice::overlay::INTRO_LABEL, tauri::WebviewUrl::App("intro.html".into()))
+        .title("Meet Aloe voice")
+        .inner_size(740.0, 660.0)
+        .center()
+        .transparent(true)
+        .decorations(false)
+        .shadow(false)
+        .resizable(false)
+        .always_on_top(true)
+        .focused(true)
+        .visible(true)
+        .build()
+        .map(|_| ())
+        .map_err(|e| e.to_string())
+}
+
 /// False on macOS until Input Monitoring is allowed (and always off Windows and macOS).
 #[tauri::command]
 fn voice_hotkey_allowed() -> bool {
@@ -712,6 +738,7 @@ pub fn run() {
             voice_clear_drawing,
             voice_overlay_drawing,
             voice_hotkey_allowed,
+            open_voice_intro,
             sync_folders,
             add_folder,
             remove_folder,

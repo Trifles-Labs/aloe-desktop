@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { Contrast, Gauge, Hand, MessageCircleQuestion, Mic, ShieldAlert, Timer, Type, Volume2, Waves } from "lucide-react";
+import { Contrast, Gauge, Hand, MessageCircleQuestion, Mic, PlayCircle, ShieldAlert, Timer, Type, Volume2, Waves } from "lucide-react";
+import { REPLAY_VOICE_INTRO } from "./VoiceIntro";
 
 import Switch from "@aloe/ui/components/ui/Switch";
 import { ControlGroup, ControlRow } from "./ControlGroup";
@@ -80,6 +81,20 @@ export function VoicePanel({ config, setConfig }: Props) {
         title="Talk to Aloe"
         detail={`Hold or tap ${CHORD} anywhere.`}
         control={<Switch checked={config.voiceEnabled} disabled={busy} label="Talk to Aloe" onChange={setEnabled} />}
+      />
+      <ControlRow
+        icon={PlayCircle}
+        title="Voice tour"
+        detail="A one-minute walkthrough of the keys and what to say."
+        control={
+          <button
+            type="button"
+            className="secondary-button min-h-0 px-3 py-1.5 text-[13px]"
+            onClick={() => window.dispatchEvent(new Event(REPLAY_VOICE_INTRO))}
+          >
+            Show me
+          </button>
+        }
       />
       <ControlRow
         icon={Hand}
