@@ -30,6 +30,7 @@ pub mod hotkey;
 pub mod overlay;
 mod prompts;
 mod realtime;
+mod relay;
 mod speaker;
 mod speech;
 

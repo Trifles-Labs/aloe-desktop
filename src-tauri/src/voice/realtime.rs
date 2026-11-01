@@ -18,19 +18,30 @@ use tokio_tungstenite::{
     tungstenite::{client::IntoClientRequest, http::HeaderValue, Message},
 };
 
-use super::{audio::VOICE_RATE, backend::Backend};
+use super::{
+    audio::VOICE_RATE,
+    backend::{Backend, LiveSession},
+    relay,
+};
 use crate::config::{debug_log, VOICE_FINAL_TIMEOUT_MS};
 
 const REALTIME_URL: &str = "wss://api.openai.com/v1/realtime?intent=transcription";
 /// Audio is sent in ~100 ms appends rather than one per device callback.
-const APPEND_SAMPLES: usize = VOICE_RATE as usize / 10;
+pub(super) const APPEND_SAMPLES: usize = VOICE_RATE as usize / 10;
 /// The API refuses to commit less than 100 ms; anything that short wasn't speech anyway.
-const MIN_SAMPLES: usize = VOICE_RATE as usize / 10;
+pub(super) const MIN_SAMPLES: usize = VOICE_RATE as usize / 10;
 
 /// Transcribes until `audio` closes (the capture stopped), calling `on_text` with the whole
 /// transcript so far each time it grows. Returns the final text, empty when nothing was said.
-pub async fn transcribe(backend: &Backend, mut audio: UnboundedReceiver<Vec<i16>>, mut on_text: impl FnMut(&str)) -> Result<String, String> {
-    let key = backend.live_session().await?;
+/// Goes to OpenAI directly, or through the backend's Sarvam relay when the backend says so.
+pub async fn transcribe(backend: &Backend, audio: UnboundedReceiver<Vec<i16>>, on_text: impl FnMut(&str)) -> Result<String, String> {
+    match backend.live_session().await? {
+        LiveSession::OpenAI(key) => transcribe_openai(&key, audio, on_text).await,
+        LiveSession::Relay(ticket) => relay::transcribe(&backend.relay_url(), &ticket, audio, on_text).await,
+    }
+}
+
+async fn transcribe_openai(key: &str, mut audio: UnboundedReceiver<Vec<i16>>, mut on_text: impl FnMut(&str)) -> Result<String, String> {
     let mut request = REALTIME_URL.into_client_request().map_err(|e| e.to_string())?;
     let auth = HeaderValue::from_str(&format!("Bearer {key}")).map_err(|e| e.to_string())?;
     request.headers_mut().insert("Authorization", auth);
@@ -142,7 +153,7 @@ pub async fn transcribe(backend: &Backend, mut audio: UnboundedReceiver<Vec<i16>
 }
 
 /// Dev builds keep the last recording exactly as it was sent, to listen to when a transcript is off.
-fn save_debug_wav(samples: &[i16]) {
+pub(super) fn save_debug_wav(samples: &[i16]) {
     let path = std::env::temp_dir().join("aloe-voice-last.wav");
     let data_len = (samples.len() * 2) as u32;
     let mut wav = Vec::with_capacity(44 + data_len as usize);
@@ -167,14 +178,14 @@ fn save_debug_wav(samples: &[i16]) {
     }
 }
 
-async fn sleep_until(deadline: Option<Instant>) {
+pub(super) async fn sleep_until(deadline: Option<Instant>) {
     match deadline {
         Some(deadline) => tokio::time::sleep_until(deadline).await,
         None => std::future::pending().await,
     }
 }
 
-async fn send<S>(sink: &mut S, event: Value) -> Result<(), String>
+pub(super) async fn send<S>(sink: &mut S, event: Value) -> Result<(), String>
 where
     S: SinkExt<Message> + Unpin,
     S::Error: std::fmt::Display,
