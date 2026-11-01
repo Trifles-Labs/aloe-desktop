@@ -46,6 +46,14 @@ const ALLOWED_TOOLS: [&str; 13] = [
     "set_value",
 ];
 
+/// Allowed tools that only look: they never move the pointer or act on anything.
+const READ_TOOLS: [&str; 6] = ["list_apps", "list_windows", "launch_app", "get_window_state", "get_desktop_state", "zoom"];
+
+/// What a `desktop_cua_batch` may hold: actions the model can line up from one read. Reads, app
+/// launches and drags stay single calls, where the model sees each result before going on.
+const BATCH_TOOLS: [&str; 6] = ["click", "type_text", "set_value", "press_key", "hotkey", "scroll"];
+pub const MAX_BATCH_STEPS: usize = 8;
+
 /// Arguments that make the driver write files wherever the caller says.
 const FILE_WRITING_ARGUMENTS: [&str; 3] = ["screenshot_out_file", "debug_image_out", "output_path"];
 
@@ -97,6 +105,31 @@ pub struct OwnWindow {
     pub w: i32,
     pub h: i32,
     pub focused: bool,
+}
+
+pub fn is_read_tool(tool: &str) -> bool {
+    READ_TOOLS.contains(&tool)
+}
+
+/// The steps of a `desktop_cua_batch` job, each `{ tool, arguments }`, checked before any runs: a
+/// batch is only actions, and at most MAX_BATCH_STEPS of them. Each step still goes through `call`
+/// and every guard there, one at a time.
+pub fn batch_steps(input: &Value) -> Result<Vec<Value>, String> {
+    let steps = input.get("steps").and_then(Value::as_array).ok_or("steps is required: a list of { tool, arguments }.")?;
+    if steps.is_empty() || steps.len() > MAX_BATCH_STEPS {
+        return Err(format!("A batch holds 1 to {MAX_BATCH_STEPS} steps; this one has {}.", steps.len()));
+    }
+    for (index, step) in steps.iter().enumerate() {
+        let tool = step.get("tool").and_then(Value::as_str).unwrap_or_default();
+        if !BATCH_TOOLS.contains(&tool) {
+            return Err(format!(
+                "Step {} is \"{tool}\", which a batch cannot hold. A batch takes only {}; make reads and other calls on their own.",
+                index + 1,
+                BATCH_TOOLS.join(", ")
+            ));
+        }
+    }
+    Ok(steps.clone())
 }
 
 /// Runs one Cua tool for the desktop agent. `own_window` is Aloe's main window when it is on
@@ -228,9 +261,10 @@ fn prepare_arguments(tool: &str, arguments: Value, session: &str) -> Result<Valu
             arguments
                 .entry("max_image_dimension")
                 .or_insert_with(|| json!(SCREENSHOT_MAX_DIMENSION));
-            // A since read checks what an action changed, and the tree diff says that. Leaving the
-            // screenshot out unless asked for keeps it from pushing the last full read's out.
-            if arguments.contains_key("since") {
+            // A since read checks what an action changed, and the tree diff says that; a query read
+            // looks up rows. Leaving the screenshot out unless asked for keeps each step small and
+            // keeps it from pushing the last full read's out.
+            if arguments.contains_key("since") || arguments.contains_key("query") {
                 arguments.entry("include_screenshot").or_insert(json!(false));
             }
             if let Some(timeout) = arguments.get("timeout_ms").and_then(Value::as_u64) {
@@ -572,6 +606,32 @@ mod tests {
         assert!(prepared.get("screenshot_out_file").is_none());
         assert_eq!(prepared["timeout_ms"], MAX_TREE_TIMEOUT_MS);
         assert_eq!(prepared["max_image_dimension"], SCREENSHOT_MAX_DIMENSION);
+    }
+
+    #[test]
+    fn query_and_since_reads_leave_the_screenshot_out_unless_asked() {
+        let query = prepare_arguments("get_window_state", json!({ "pid": 1, "window_id": 2, "query": "Save" }), "s").unwrap();
+        assert_eq!(query["include_screenshot"], false);
+        let since = prepare_arguments("get_window_state", json!({ "pid": 1, "window_id": 2, "since": "s1" }), "s").unwrap();
+        assert_eq!(since["include_screenshot"], false);
+        let asked = prepare_arguments("get_window_state", json!({ "pid": 1, "window_id": 2, "query": "Save", "include_screenshot": true }), "s").unwrap();
+        assert_eq!(asked["include_screenshot"], true);
+        let full = prepare_arguments("get_window_state", json!({ "pid": 1, "window_id": 2 }), "s").unwrap();
+        assert!(full.get("include_screenshot").is_none());
+    }
+
+    #[test]
+    fn a_batch_holds_only_actions_and_a_bounded_number_of_them() {
+        let click = json!({ "tool": "click", "arguments": { "element_token": "s1:2" } });
+        assert_eq!(batch_steps(&json!({ "steps": [click.clone(), click.clone()] })).unwrap().len(), 2);
+        assert!(batch_steps(&json!({ "steps": [] })).is_err());
+        assert!(batch_steps(&json!({})).is_err());
+        assert!(batch_steps(&json!({ "steps": vec![click.clone(); MAX_BATCH_STEPS + 1] })).is_err());
+        for tool in ["get_window_state", "launch_app", "drag", "run_steps", "run_script", "kill_app"] {
+            let step = json!({ "tool": tool, "arguments": {} });
+            assert!(batch_steps(&json!({ "steps": [click.clone(), step] })).is_err(), "{tool} must not be batchable");
+        }
+        assert!(is_read_tool("get_window_state") && !is_read_tool("click"));
     }
 
     #[test]

@@ -211,6 +211,15 @@ pub async fn execute_job(app: AppHandle, job: AgentJob) {
     let input_snapshot = job.input.clone();
     let result = dispatch_tool(&app, &state, &config, &job).await;
     let (status, output, error) = outcome(result);
+    // The desktop agent waits on every Cua step, so its result goes over the open socket first,
+    // which skips a new HTTPS request. The POST still follows as the reliable path, in case the
+    // socket dropped before the message went out; the backend just records the same result again.
+    if job.kind.starts_with("desktop_cua") {
+        if let Some(sender) = state.outbound.lock().unwrap_or_else(std::sync::PoisonError::into_inner).as_ref() {
+            let message = json!({ "type": "job_result", "jobId": job.id, "status": status, "result": output, "error": error });
+            let _ = sender.send(Message::Text(message.to_string().into()));
+        }
+    }
     post_result(&state, &config, &job.id, status, output.clone(), error.clone()).await;
     debug_log("job", "completed", format!("job_id={} kind={} status={status}", job.id, job.kind));
     record_and_emit(&app, &state, &job.id, &job.kind, status, error.as_deref(), Some(input_snapshot), output);

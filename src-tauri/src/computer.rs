@@ -358,6 +358,9 @@ pub async fn dispatch_desktop_control(app: &AppHandle, kind: &str, input: &Value
     if kind == "desktop_cua" {
         return dispatch_cua(app, input).await;
     }
+    if kind == "desktop_cua_batch" {
+        return dispatch_cua_batch(app, input).await;
+    }
 
     let window = aloe_window(app);
     let action = kind.to_string();
@@ -399,6 +402,8 @@ pub async fn dispatch_desktop_control(app: &AppHandle, kind: &str, input: &Value
 /// A Cua Driver tool call. No screenshot is added afterwards: the model reads state back itself
 /// (get_window_state with `since`), which is cheaper than a full screen per step.
 async fn dispatch_cua(app: &AppHandle, input: &Value) -> Result<Value, String> {
+    let started = std::time::Instant::now();
+    let tool = input.get("tool").and_then(Value::as_str).unwrap_or_default().to_string();
     let display_width = match on_input_thread(app, check_failsafe).await? {
         Ok(width) => width,
         Err(ControlError::Failsafe) => {
@@ -414,13 +419,62 @@ async fn dispatch_cua(app: &AppHandle, input: &Value) -> Result<Value, String> {
     let result = cua::call(app, input, window, display_width).await;
     overlay::set_pill_interactive(app, true);
     // A foreground-delivery action can move the real pointer; where it leaves it is Aloe's doing.
-    let _ = on_input_thread(app, || {
-        if let Ok(enigo) = new_enigo() {
-            *LAST_POINTER.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = enigo.location().ok();
-        }
-    })
-    .await;
+    // Reads never move it, so they skip this second trip to the input thread.
+    if !cua::is_read_tool(&tool) {
+        let _ = on_input_thread(app, || {
+            if let Ok(enigo) = new_enigo() {
+                *LAST_POINTER.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = enigo.location().ok();
+            }
+        })
+        .await;
+    }
+    debug_log("cua", "job", format!("{tool} total_ms={}", started.elapsed().as_millis()));
     result
+}
+
+/// Several Cua actions in one job, so the model need not wait a round trip between steps it could
+/// already line up from one read. Each step is a whole `dispatch_cua`: the corner failsafe, the
+/// own-window guards and the allowlist apply to every step exactly as to a single call. Stops at the
+/// first failed step and reports which steps ran; `read_after` (get_window_state arguments) reads
+/// the window once all of them did.
+async fn dispatch_cua_batch(app: &AppHandle, input: &Value) -> Result<Value, String> {
+    let steps = cua::batch_steps(input)?;
+    let mut results = Vec::with_capacity(steps.len());
+    for (index, step) in steps.iter().enumerate() {
+        // The Stop button may switch control off between steps; it must end the batch there.
+        if !control_enabled(app) {
+            return Err(DISABLED_MESSAGE.to_string());
+        }
+        match dispatch_cua(app, step).await {
+            Ok(result) => results.push(result),
+            // Stopping control ends the whole batch as an error, like a single call.
+            Err(error) if error == FAILSAFE_MESSAGE || error == DISABLED_MESSAGE => return Err(error),
+            Err(error) => {
+                return Ok(json!({
+                    "completed_steps": index,
+                    "failed_step": index + 1,
+                    "error": error,
+                    "results": results,
+                    "note": "Steps after the failed one did not run. Read the window before going on.",
+                }));
+            }
+        }
+    }
+    let mut summary = json!({ "completed_steps": steps.len(), "results": results });
+    if let Some(read) = input.get("read_after").filter(|read| read.is_object()) {
+        // The read's text and screenshot go at the top level, where a single get_window_state
+        // puts them, so the backend trims and pages them out of history the same way.
+        match dispatch_cua(app, &json!({ "tool": "get_window_state", "arguments": read })).await {
+            Ok(Value::Object(state)) => {
+                if let Some(map) = summary.as_object_mut() {
+                    map.extend(state);
+                }
+            }
+            Ok(_) => {}
+            Err(error) => summary["read_after_error"] = Value::String(error),
+        }
+    }
+    Ok(summary)
 }
 
 /// The corner failsafe on its own. Reports the primary display's width, which the Cua bridge
