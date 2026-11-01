@@ -866,6 +866,14 @@ async fn ask(app: &AppHandle, speaker: &Speaker, generation: u64, backend: &Back
         let Ok(heard) = heard.await else { break };
         debug_log("voice", "prompt_answer", format!("heard={heard:?}"));
         answer = prompt.understand(&heard);
+        // "Sure, go for it", "the second one I guess": the word matcher can't place these, so
+        // the backend gets one try at it before Aloe asks again.
+        if answer == Answer::Unclear && prompt.wants_second_opinion(&heard) {
+            if let Some(reply) = backend.interpret_answer(&prompt.read_back(), &heard, prompt.interpret_options()).await {
+                answer = prompt.answer_from_interpretation(&reply);
+                debug_log("voice", "prompt_second_opinion", format!("answer={answer:?}"));
+            }
+        }
         if answer != Answer::Unclear {
             break;
         }

@@ -3,10 +3,16 @@
 //! The OpenAI key lives on the backend. All this side ever holds is a one-minute ephemeral key for
 //! opening the transcription socket (`live_session`); speech is fetched through the backend too.
 
+use std::time::Duration;
+
 use reqwest::{Client, RequestBuilder, Response, StatusCode};
 use serde_json::{json, Value};
 
+use super::prompts::Choice;
 use crate::models::AgentConfig;
+
+/// The person is waiting in silence while this runs; past this, just ask them again.
+const INTERPRET_TIMEOUT: Duration = Duration::from_millis(1_500);
 
 #[derive(Clone)]
 pub struct Backend {
@@ -31,6 +37,26 @@ impl Backend {
 
     fn post(&self, path: &str) -> RequestBuilder {
         self.client.post(format!("{}{}", self.api_url, path)).bearer_auth(&self.user_token)
+    }
+
+    /// A second opinion on a spoken answer the word matcher couldn't settle (backend asks Jev).
+    /// `None` on any failure or slow reply: the caller asks again, exactly as without it.
+    pub async fn interpret_answer(&self, prompt: &str, heard: &str, options: Option<&[Choice]>) -> Option<Value> {
+        let mut body = json!({ "prompt": prompt, "heard": heard });
+        if let Some(options) = options {
+            body["options"] = options.iter().map(|o| json!({ "label": o.label, "value": o.value })).collect();
+        }
+        let response = self
+            .post("/api/voice/interpret-answer")
+            .timeout(INTERPRET_TIMEOUT)
+            .json(&body)
+            .send()
+            .await
+            .ok()?;
+        if !response.status().is_success() {
+            return None;
+        }
+        response.json().await.ok()
     }
 
     /// An ephemeral OpenAI key for one transcription socket.

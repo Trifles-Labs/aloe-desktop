@@ -88,6 +88,48 @@ impl Prompt {
         matches!(self, Prompt::ConnectorApproval { .. } | Prompt::CommandApproval { .. })
     }
 
+    /// Whether an answer `understand` called Unclear is worth a second opinion from the backend.
+    /// Not for free text (nothing to interpret) or multi-select (several picks don't map to one).
+    /// Never for anything with a "no" word in it: `understand` already refuses those, and an
+    /// outside opinion must not be able to turn them into a yes.
+    pub fn wants_second_opinion(&self, heard: &str) -> bool {
+        if heard.trim().is_empty() || match_yes_no(heard) == Answer::No {
+            return false;
+        }
+        match self {
+            Prompt::Question { mode: QuestionMode::Single, options, .. } => options.len() >= 2,
+            Prompt::Question { .. } => false,
+            _ => true,
+        }
+    }
+
+    /// The options to send with a second-opinion request; `None` for a yes/no prompt.
+    pub fn interpret_options(&self) -> Option<&[Choice]> {
+        match self {
+            Prompt::Question { options, .. } if !options.is_empty() => Some(options),
+            _ => None,
+        }
+    }
+
+    /// The backend's reading (`{"answer": "yes" | "no" | "option" | "unclear", "value"?}`) as an
+    /// Answer. Only accepts what fits this prompt: yes/no for approvals, one of this prompt's own
+    /// option values for a question. Anything else stays Unclear.
+    pub fn answer_from_interpretation(&self, reply: &Value) -> Answer {
+        let kind = reply.get("answer").and_then(Value::as_str).unwrap_or_default();
+        match self {
+            _ if self.is_yes_no() => match kind {
+                "yes" => Answer::Yes,
+                "no" => Answer::No,
+                _ => Answer::Unclear,
+            },
+            Prompt::Question { mode: QuestionMode::Single, options, .. } if kind == "option" => {
+                let value = reply.get("value").and_then(Value::as_str).unwrap_or_default();
+                options.iter().find(|o| o.value == value).map_or(Answer::Unclear, |o| Answer::Text(o.value.clone()))
+            }
+            _ => Answer::Unclear,
+        }
+    }
+
     /// What Aloe says to ask.
     pub fn read_back(&self) -> String {
         match self {
@@ -298,6 +340,36 @@ mod tests {
         assert_eq!(match_choice("pizza or sushi bar", &opts), None, "two names is ambiguous");
         assert_eq!(match_choice("seven", &opts), None, "out of range");
         assert_eq!(match_choice("whatever you think", &opts), None);
+    }
+
+    #[test]
+    fn second_opinion_only_where_it_can_help() {
+        let approval = Prompt::CommandApproval { job_id: "j".into(), command: "npm test".into(), reason: String::new() };
+        assert!(approval.wants_second_opinion("sounds good to me"));
+        assert!(!approval.wants_second_opinion("hmm, not now"), "a no word is final");
+        assert!(!approval.wants_second_opinion("  "));
+        let single = Prompt::Question { id: "q".into(), question: "Which?".into(), mode: QuestionMode::Single, options: options(&["Downloads", "Desktop"]) };
+        assert!(single.wants_second_opinion("the latter"));
+        let free = Prompt::Question { id: "q".into(), question: "Name?".into(), mode: QuestionMode::FreeText, options: Vec::new() };
+        assert!(!free.wants_second_opinion("Priya"));
+        let multi = Prompt::Question { id: "q".into(), question: "Which?".into(), mode: QuestionMode::Multi, options: options(&["A", "B"]) };
+        assert!(!multi.wants_second_opinion("both I guess"));
+    }
+
+    #[test]
+    fn interpretation_must_fit_the_prompt() {
+        let approval = Prompt::ConnectorApproval { id: "a".into(), summary: "Send it.".into() };
+        assert_eq!(approval.answer_from_interpretation(&json!({ "answer": "yes" })), Answer::Yes);
+        assert_eq!(approval.answer_from_interpretation(&json!({ "answer": "no" })), Answer::No);
+        assert_eq!(approval.answer_from_interpretation(&json!({ "answer": "option", "value": "x" })), Answer::Unclear);
+        assert_eq!(approval.answer_from_interpretation(&json!({ "answer": "unclear" })), Answer::Unclear);
+
+        let single = Prompt::Question { id: "q".into(), question: "Which?".into(), mode: QuestionMode::Single, options: options(&["Downloads", "Desktop"]) };
+        assert_eq!(single.answer_from_interpretation(&json!({ "answer": "option", "value": "desktop" })), Answer::Text("desktop".into()));
+        assert_eq!(single.answer_from_interpretation(&json!({ "answer": "option", "value": "C:/elsewhere" })), Answer::Unclear, "only this prompt's own values");
+        assert_eq!(single.answer_from_interpretation(&json!({ "answer": "yes" })), Answer::Unclear);
+        assert_eq!(single.interpret_options().map(|o| o.len()), Some(2));
+        assert!(approval.interpret_options().is_none());
     }
 
     #[test]
