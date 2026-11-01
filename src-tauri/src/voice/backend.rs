@@ -1,6 +1,6 @@
 //! The Aloe backend calls push-to-talk makes, as the signed-in user from this device.
 //!
-//! The OpenAI key lives on the backend. All this side ever holds is a one-minute ephemeral key for
+//! The OpenAI and Sarvam keys live on the backend. All this side ever holds is a one-minute key for
 //! opening the transcription socket (`live_session`); speech is fetched through the backend too.
 
 use std::time::Duration;
@@ -13,6 +13,13 @@ use crate::models::AgentConfig;
 
 /// The person is waiting in silence while this runs; past this, just ask them again.
 const INTERPRET_TIMEOUT: Duration = Duration::from_millis(1_500);
+
+pub enum LiveSession {
+    /// Straight to OpenAI's realtime socket.
+    OpenAI(String),
+    /// Through the backend, which holds the Sarvam key.
+    Relay(String),
+}
 
 #[derive(Clone)]
 pub struct Backend {
@@ -59,11 +66,21 @@ impl Backend {
         response.json().await.ok()
     }
 
-    /// An ephemeral OpenAI key for one transcription socket.
-    pub async fn live_session(&self) -> Result<String, String> {
+    /// The key for one transcription socket: an ephemeral OpenAI key, or, when the backend uses
+    /// Sarvam, a one-use ticket for the backend's own relay at `relay_url`.
+    pub async fn live_session(&self) -> Result<LiveSession, String> {
         let response = self.post("/api/voice/live-session").send().await.map_err(network)?;
         let body: Value = ok_json(response, "Couldn't start listening").await?;
-        body.get("key").and_then(Value::as_str).map(str::to_string).ok_or_else(|| "Couldn't start listening: no key in the reply.".to_string())
+        let key = body.get("key").and_then(Value::as_str).map(str::to_string).ok_or_else(|| "Couldn't start listening: no key in the reply.".to_string())?;
+        Ok(match body.get("provider").and_then(Value::as_str) {
+            Some("sarvam") => LiveSession::Relay(key),
+            _ => LiveSession::OpenAI(key),
+        })
+    }
+
+    /// The backend's push-to-talk relay socket, on the same host as the API.
+    pub fn relay_url(&self) -> String {
+        relay_url_for(&self.api_url)
     }
 
     /// One sentence of Aloe's reply as 24 kHz mono PCM16, streamed. `pace` is "slow", "normal" or
@@ -137,6 +154,27 @@ impl Backend {
         let Ok(body) = response.json::<Value>().await else { return };
         let Some(id) = body.get("id").and_then(Value::as_str) else { return };
         let _ = self.post(&format!("/api/chat/{id}/stop")).send().await;
+    }
+}
+
+/// `https://api…` → `wss://api…/api/voice/live`; plain http (local dev) gets plain ws.
+fn relay_url_for(api_url: &str) -> String {
+    let socket_base = match api_url.split_once("://") {
+        Some(("https", rest)) => format!("wss://{rest}"),
+        Some((_, rest)) => format!("ws://{rest}"),
+        None => format!("ws://{api_url}"),
+    };
+    format!("{socket_base}/api/voice/live")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::relay_url_for;
+
+    #[test]
+    fn relay_url_follows_the_api_scheme() {
+        assert_eq!(relay_url_for("https://api.aloe.example"), "wss://api.aloe.example/api/voice/live");
+        assert_eq!(relay_url_for("http://localhost:3000"), "ws://localhost:3000/api/voice/live");
     }
 }
 
