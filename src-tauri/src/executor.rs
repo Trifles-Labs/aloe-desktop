@@ -465,7 +465,8 @@ async fn run_tool(
         "wait_terminal_session"  => wait_terminal_session(state, job.input.clone()).await,
         "open_local_url"         => open_local_url(&job.input).await,
         "capture_desktop_screenshot" => capture_desktop_screenshot(app).await,
-        "capture_screen_region"  => crate::computer::capture_screen_region(&job.input).await,
+        "capture_screen_region"  => crate::computer::capture_screen_region(app, &job.input).await,
+        "fit_screen_box"         => crate::computer::fit_screen_box(app, &job.input).await,
         "get_editor_context"     => get_editor_context(config, &job.input).await,
         "show_notification"      => show_notification(app, &job.input).await,
         // Marks over the screen during a voice reply (voice/drawing.rs).

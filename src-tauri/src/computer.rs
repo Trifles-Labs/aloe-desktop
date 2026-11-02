@@ -209,7 +209,7 @@ static LOCATE_SHOTS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicU
 /// full screenshot, optionally with a numbered grid drawn over it (`grid: { cols, rows }`, see
 /// screen_grid.rs). For the backend to find something exactly before drawing a mark on it (see
 /// voice/drawing.rs), where the downscaled full screenshot is too coarse to place it.
-pub async fn capture_screen_region(input: &Value) -> Result<Value, String> {
+pub async fn capture_screen_region(app: &AppHandle, input: &Value) -> Result<Value, String> {
     let field = |name: &str| input.get(name).and_then(Value::as_f64).filter(|n| n.is_finite());
     let (Some(x), Some(y), Some(w), Some(h)) = (field("x"), field("y"), field("w"), field("h")) else {
         return Err("x, y, w and h are required.".to_string());
@@ -218,6 +218,7 @@ pub async fn capture_screen_region(input: &Value) -> Result<Value, String> {
         let count = |name: &str| grid.get(name).and_then(Value::as_u64).map(|n| n as u32);
         Some((count("cols")?, count("rows")?))
     });
+    let _hidden = crate::voice::overlay::own_capture(app).await;
     tauri::async_runtime::spawn_blocking(move || {
         let monitors = Monitor::all().map_err(|e| format!("Could not list displays: {e}"))?;
         let monitor = monitors.iter().find(|m| m.is_primary()).or_else(|| monitors.first()).ok_or_else(|| "No display found.".to_string())?;
@@ -262,7 +263,46 @@ pub async fn capture_screen_region(input: &Value) -> Result<Value, String> {
     .map_err(|e| e.to_string())?
 }
 
+/// A box (`{ x, y, w, h }` on the 0–1000 grid of the full screenshot) snapped onto the text or shape
+/// drawn in and just around it at the display's own resolution (screen_fit.rs), as `{ box }`, or
+/// `{ box: null }` when the background is too busy to tell. The last step of placing a mark.
+pub async fn fit_screen_box(app: &AppHandle, input: &Value) -> Result<Value, String> {
+    let field = |name: &str| input.get(name).and_then(Value::as_f64).filter(|n| n.is_finite());
+    let (Some(x), Some(y), Some(w), Some(h)) = (field("x"), field("y"), field("w"), field("h")) else {
+        return Err("x, y, w and h are required.".to_string());
+    };
+    let _hidden = crate::voice::overlay::own_capture(app).await;
+    tauri::async_runtime::spawn_blocking(move || {
+        let monitors = Monitor::all().map_err(|e| format!("Could not list displays: {e}"))?;
+        let monitor = monitors.iter().find(|m| m.is_primary()).or_else(|| monitors.first()).ok_or_else(|| "No display found.".to_string())?;
+        let captured = monitor.capture_image().map_err(|e| format!("Screen capture failed: {e}.{}", permission_hint()))?;
+        let (full_w, full_h) = captured.dimensions();
+        let to_px = |grid: f64, size: u32| ((grid.clamp(0.0, GRID) / GRID) * size as f64).round() as u32;
+        let (left, top) = (to_px(x, full_w).min(full_w - 1), to_px(y, full_h).min(full_h - 1));
+        let (right, bottom) = (to_px(x + w, full_w).clamp(left + 1, full_w), to_px(y + h, full_h).clamp(top + 1, full_h));
+        // Room to grow a cut-off word back, and to see the page around it: more sideways, where
+        // words run on, than up and down.
+        let tall = f64::from(bottom - top);
+        let (mx, my) = ((tall * 1.5).clamp(12.0, 120.0) as u32, (tall * 0.6).clamp(8.0, 60.0) as u32);
+        let (cl, ct) = (left.saturating_sub(mx), top.saturating_sub(my));
+        let (cr, cb) = ((right + mx).min(full_w), (bottom + my).min(full_h));
+        let crop = DynamicImage::ImageRgba8(captured).crop_imm(cl, ct, cr - cl, cb - ct).to_rgb8();
+        let inner = crate::screen_fit::PxBox { x0: left - cl, y0: top - ct, x1: right - cl, y1: bottom - ct };
+        let grid = |px: u32, size: u32| px as f64 / size as f64 * GRID;
+        Ok(match crate::screen_fit::fit(&crop, inner) {
+            Some(b) => json!({ "box": {
+                "x": grid(cl + b.x0, full_w), "y": grid(ct + b.y0, full_h),
+                "w": grid(b.x1 - b.x0, full_w), "h": grid(b.y1 - b.y0, full_h),
+            } }),
+            None => json!({ "box": null }),
+        })
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
 pub async fn capture_desktop_screenshot(app: &AppHandle) -> Result<Value, String> {
+    let _hidden = crate::voice::overlay::own_capture(app).await;
     on_input_thread(app, || {
         let geometry = new_enigo().and_then(|enigo| display_geometry(&enigo)).ok();
         capture(geometry)

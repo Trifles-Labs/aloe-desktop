@@ -61,7 +61,7 @@
       .island {
         position: fixed; top: 12px; left: 50%;
         width: 0; height: 0;
-        border-radius: calc(22px * var(--scale));
+        border-radius: calc(18px * var(--scale));
         background: var(--surface);
         box-shadow: inset 0 0 0 1px rgb(var(--tint) / 0.35), 0 12px 32px rgb(0 0 0 / 0.4);
         -webkit-backdrop-filter: blur(20px) saturate(1.3);
@@ -83,16 +83,16 @@
         position: absolute; left: 0; top: 0;
         box-sizing: border-box;
         width: max-content;
-        min-width: calc(232px * var(--scale));
-        max-width: min(calc(440px * var(--scale)), calc(100vw - 32px));
-        padding: calc(6px * var(--scale)) calc(6px * var(--scale)) calc(6px * var(--scale)) calc(8px * var(--scale));
+        min-width: calc(200px * var(--scale));
+        max-width: min(calc(340px * var(--scale)), calc(100vw - 32px));
+        padding: calc(4px * var(--scale)) calc(4px * var(--scale)) calc(4px * var(--scale)) calc(6px * var(--scale));
       }
-      #root[data-content] .inner { padding-bottom: calc(14px * var(--scale)); }
+      #root[data-content] .inner { padding-bottom: calc(10px * var(--scale)); }
 
-      .head { display: flex; align-items: center; gap: calc(10px * var(--scale)); height: calc(32px * var(--scale)); }
+      .head { display: flex; align-items: center; gap: calc(8px * var(--scale)); height: calc(26px * var(--scale)); }
       .orb {
         position: relative; flex: none;
-        width: calc(48px * var(--scale)); height: calc(28px * var(--scale));
+        width: calc(38px * var(--scale)); height: calc(22px * var(--scale));
         border-radius: 999px;
         background:
           radial-gradient(circle at 32% 28%, rgb(255 255 255 / 0.3), transparent 55%),
@@ -117,7 +117,7 @@
       [data-phase="error"] .orb { animation: shake 320ms var(--ease-in-out) 1; }
       @keyframes shake { 20% { translate: -3px 0; } 45% { translate: 3px 0; } 70% { translate: -2px 0; } 100% { translate: 0 0; } }
 
-      .label { flex: 1; min-width: 0; font-weight: 500; font-size: calc(13px * var(--scale)); color: var(--cream-soft); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+      .label { flex: 1; min-width: 0; font-weight: 500; font-size: calc(12px * var(--scale)); color: var(--cream-soft); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
       .label.swap { animation: swap 220ms var(--ease-out) both; }
       @keyframes swap { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
       [data-phase="thinking"] .label:not([data-control]) {
@@ -128,15 +128,15 @@
       @keyframes shimmer { from { background-position: 100% 0; } to { background-position: 0 0; } }
 
       .stop, .close {
-        flex: none; height: calc(28px * var(--scale)); padding: 0;
+        flex: none; height: calc(22px * var(--scale)); padding: 0;
         border: 0; border-radius: 999px;
-        font: inherit; font-size: calc(13px * var(--scale)); line-height: 1; color: var(--cream);
+        font: inherit; font-size: calc(12px * var(--scale)); line-height: 1; color: var(--cream);
         cursor: pointer;
         transition: background-color 150ms ease, transform 120ms var(--ease-out), opacity 200ms ease;
       }
       .stop { display: none; padding: 0 calc(12px * var(--scale)); background: rgb(var(--gold-rgb) / 0.2); color: var(--gold); font-weight: 600; }
       #root[data-control] .stop { display: block; animation: swap 220ms var(--ease-out) both; }
-      .close { width: calc(28px * var(--scale)); display: grid; place-items: center; background: rgb(244 247 240 / 0.08); color: var(--cream-soft); }
+      .close { width: calc(22px * var(--scale)); display: grid; place-items: center; background: rgb(244 247 240 / 0.08); color: var(--cream-soft); }
       .stop:active, .close:active { transform: scale(0.95); }
       .stop:focus-visible, .close:focus-visible { outline: 2px solid rgb(var(--tint)); outline-offset: 2px; }
       @media (hover: hover) and (pointer: fine) {
@@ -149,15 +149,15 @@
       .body {
         position: relative;
         display: flex; flex-direction: column; gap: 6px;
-        max-height: calc(200px * var(--scale));
+        max-height: calc(104px * var(--scale));
         overflow-x: hidden; overflow-y: auto;
         overscroll-behavior: contain;
         scrollbar-width: thin;
         scrollbar-color: rgb(244 247 240 / 0.22) transparent;
-        padding: 0 calc(8px * var(--scale));
+        padding: 0 calc(6px * var(--scale));
       }
       #root:not([data-content]) .body { display: none; }
-      #root[data-content] .body { margin-top: calc(8px * var(--scale)); }
+      #root[data-content] .body { margin-top: calc(4px * var(--scale)); }
       .body[data-clip-top] {
         -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 26px);
         mask-image: linear-gradient(to bottom, transparent 0, #000 26px);
@@ -171,11 +171,11 @@
         mask-image: linear-gradient(to bottom, transparent 0, #000 26px, #000 calc(100% - 26px), transparent 100%);
       }
       .said, .reply, .status, .error, .ask-text, .ask-hint { margin: 0; }
-      .said, .reply { white-space: pre-wrap; overflow-wrap: anywhere; font-size: calc(15px * var(--scale)); }
+      .said, .reply { white-space: pre-wrap; overflow-wrap: anywhere; font-size: calc(13px * var(--scale)); line-height: 1.4; }
       .said { color: var(--cream); transition: font-size 260ms var(--ease-out), color 260ms ease; }
       .said:empty, .reply:empty, .status:empty, .error:empty { display: none; }
       /* Once Aloe answers, what you said steps back to a one-line caption. */
-      #root[data-replied] .said { font-size: calc(12px * var(--scale)); color: var(--cream-soft); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+      #root[data-replied] .said { font-size: calc(11px * var(--scale)); color: var(--cream-soft); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
       .reply { color: var(--cream); }
       .status { font-size: calc(12px * var(--scale)); color: var(--cream-soft); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
       .error { font-size: calc(13px * var(--scale)); color: var(--gold); }
@@ -205,7 +205,7 @@
       .ask { display: none; }
       [data-phase="asking"] .ask { display: block; }
       [data-phase="asking"] .reply { display: none; }
-      .ask-text { font-size: calc(16px * var(--scale)); font-weight: 600; line-height: 1.35; white-space: pre-wrap; overflow-wrap: anywhere; }
+      .ask-text { font-size: calc(14px * var(--scale)); font-weight: 600; line-height: 1.35; white-space: pre-wrap; overflow-wrap: anywhere; }
       .ask-options { list-style: none; margin: 8px 0 0; padding: 0; display: flex; flex-wrap: wrap; gap: 6px; counter-reset: option; }
       .ask-options:empty { display: none; }
       .ask-options li {
@@ -224,22 +224,66 @@
       .ask-hint { margin-top: 8px; font-size: calc(13px * var(--scale)); color: rgb(var(--moss)); font-weight: 600; }
 
       /* Marks Aloe draws over the screen (src/voice-drawing.ts). Under the island, never clickable
-         except the clear chip. A soft shadow keeps them readable on light and dark content. */
+         except the clear chip. A soft shadow keeps them readable on light and dark content. Each
+         piece is drawn on at its own --delay for its own --dur, set by the script from its length,
+         with a pen tip (.pen) travelling along it, so marks appear as if drawn by hand. */
+      :root { --ease-draw: cubic-bezier(0.45, 0.05, 0.3, 1); }
       .marks { position: fixed; inset: 0; width: 100%; height: 100%; pointer-events: none; overflow: visible; }
       .marks .mark { filter: drop-shadow(0 1px 1.5px rgb(0 0 0 / 0.45)); }
       .marks .marker { opacity: 0.38; filter: none; }
+      .marks .wash { fill-opacity: 0.14; }
       .marks .dashed { stroke-dasharray: 0.02 0.015; }
-      .mark.fresh .ink { stroke-dasharray: 1; stroke-dashoffset: 1; animation: ink 520ms var(--ease-out) var(--delay) forwards; }
-      .mark.fresh .marker { transform-box: fill-box; transform-origin: 0 50%; transform: scaleX(0); animation: marker 420ms var(--ease-out) var(--delay) forwards; }
-      .mark.fresh .pop, .mark.fresh .fade { opacity: 0; animation: appear 220ms ease calc(var(--delay) + 360ms) forwards; }
+      .mark.fresh .ink { stroke-dasharray: 1; stroke-dashoffset: 1; animation: ink var(--dur, 520ms) var(--ease-draw) var(--delay) forwards; }
+      .mark.fresh .marker { transform-box: fill-box; transform-origin: 0 50%; transform: scaleX(0); animation: marker var(--dur, 420ms) var(--ease-draw) var(--delay) forwards; }
+      .mark.fresh .fade { opacity: 0; animation: appear var(--dur, 220ms) ease var(--delay) forwards; }
+      .mark.fresh .pop { opacity: 0; transform-box: fill-box; transform-origin: center; scale: 0; animation: pop 260ms var(--spring) var(--delay) forwards; }
       .mark.fresh .marker { opacity: 0.38; }
       @keyframes ink { to { stroke-dashoffset: 0; } }
       @keyframes marker { to { transform: scaleX(1); } }
       @keyframes appear { to { opacity: 1; } }
+      @keyframes pop { to { opacity: 1; scale: 1; } }
       .notes { position: fixed; inset: 0; pointer-events: none; }
+      .pen {
+        position: absolute; left: 0; top: 0; width: 9px; height: 9px; border-radius: 50%;
+        background: var(--accent); box-shadow: 0 0 0 2px rgb(255 255 255 / 0.6), 0 0 12px var(--accent);
+        offset-anchor: center; offset-rotate: 0deg; offset-distance: 0%; opacity: 0;
+        animation: pen var(--dur) var(--ease-draw) var(--delay) both;
+      }
+      @keyframes pen { 0% { offset-distance: 0%; opacity: 0; } 6% { opacity: 1; } 88% { opacity: 1; } 100% { offset-distance: 100%; opacity: 0; } }
       /* Marks fade out together, with the answer they belong to. */
       .marks, .notes { transition: opacity 450ms var(--ease-out); }
       #root:not([data-marks]) .marks, #root:not([data-marks]) .notes { opacity: 0; }
+      /* Handwriting (src/voice-writing.ts): Markdown and KaTeX in a marker hand, each word and
+         formula wiped on left to right in turn (--d after the mark's --delay, for --t). Letters
+         and digits in formulas are in the hand too; the symbols stay typeset. */
+      .write {
+        position: absolute; width: max-content;
+        color: var(--accent);
+        font: 500 34px/1.2 "Caveat", "Segoe Print", "Bradley Hand", cursive;
+        overflow-wrap: anywhere;
+        /* An outline against what is beneath: light round dark ink, dark round light ink. */
+        filter: drop-shadow(0 0 1px rgb(255 255 255 / 0.95)) drop-shadow(0 0 3px rgb(255 255 255 / 0.7));
+      }
+      .write[data-ink="light"] { filter: drop-shadow(0 0 1px rgb(0 0 0 / 0.9)) drop-shadow(0 1px 3px rgb(0 0 0 / 0.6)); }
+      .write.small { font-size: 26px; }
+      .write.large { font-size: 46px; }
+      .write .line { min-height: 1.2em; }
+      .write .gap { height: 0.45em; }
+      .write .h1 { font-size: 1.5em; font-weight: 700; line-height: 1.1; }
+      .write .h2 { font-size: 1.28em; font-weight: 700; }
+      .write .h3 { font-size: 1.1em; font-weight: 700; }
+      .write .item { position: relative; padding-left: 1.15em; }
+      .write .bullet { position: absolute; left: 0.1em; }
+      .write strong { font-weight: 700; }
+      .write code { font: 0.62em/1.3 "Geist Mono Variable", ui-monospace, monospace; padding: 0.05em 0.35em; border-radius: 0.3em; background: rgb(127 127 127 / 0.22); }
+      .write .wd { display: inline-block; }
+      .write .tex.display { display: block; margin: 0.12em 0; }
+      .write .katex { font-family: "Caveat", KaTeX_Main, "Times New Roman", serif; font-size: 0.96em; }
+      .write .katex .mathnormal { font-family: "Caveat", KaTeX_Math, serif; font-style: normal; }
+      .write .katex-display { margin: 0; text-align: left; }
+      .write .katex-display > .katex { text-align: left; }
+      .write.fresh .wd { clip-path: inset(-25% 100% -25% -8%); animation: write var(--t) linear calc(var(--delay) + var(--d)) forwards; }
+      @keyframes write { to { clip-path: inset(-25% -8% -25% -8%); } }
       .note {
         position: absolute; transform: translate(-50%, -50%);
         max-width: 280px; width: max-content;
@@ -296,6 +340,7 @@
         .orb::before, .ring, [data-phase="error"] .orb, .label, .w, .rewrite, .ask-options li, #root[data-control] .stop { animation: none !important; }
         .reply .wd { transition: none; }
         .clear-marks { transition: opacity 160ms linear; }
+        .pen { display: none; }
       }
     </style>
   </head>

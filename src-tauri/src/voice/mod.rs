@@ -283,6 +283,7 @@ async fn handle(app: &AppHandle, speaker: &Speaker, session: &mut Session, comma
                 }
             }
             Command::Hotkey(HotkeyEvent::Escape) => {
+                // The first Esc closes the answer; with nothing else up, Esc clears the marks.
                 if overlay::current().phase != Phase::Idle || speaker.is_busy() {
                     dismiss_all(&app, speaker, session);
                 } else {
@@ -294,9 +295,10 @@ async fn handle(app: &AppHandle, speaker: &Speaker, session: &mut Session, comma
     }
 }
 
+/// Closes the answer and stops Aloe talking. Marks stay: only the user takes them away (Esc with
+/// nothing else up, or the Clear marks chip), or Aloe replaces or clears them.
 fn dismiss_all(app: &AppHandle, speaker: &Speaker, session: &mut Session) {
     new_generation(session, speaker);
-    drawing::clear(app);
     overlay::show(app, View::default());
 }
 
@@ -477,11 +479,8 @@ async fn listen(app: &AppHandle, speaker: &Speaker, generation: u64, purpose: Pu
             return None;
         }
     };
+    // Marks from earlier answers stay while the user talks again; they may be asking about them.
     let fresh = matches!(purpose, Purpose::Chat { follow_up: false });
-    if fresh {
-        // Something new to talk about: the last answer's marks would point at the wrong things.
-        drawing::clear(app);
-    }
     let answering = matches!(purpose, Purpose::Answer(_));
     update(app, generation, |view| {
         if fresh {

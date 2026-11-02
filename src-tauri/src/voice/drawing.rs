@@ -6,14 +6,11 @@
 //! already checked and clamped every mark; this keeps the list and hands it to the page, which
 //! draws text with textContent only.
 //!
-//! Marks fade with the voice overlay, once the answer they were drawn for is over (overlay.rs
-//! `show`), or sooner when the user starts talking again, presses Esc or the ✕, or Aloe clears
-//! them. Drawn with no voice overlay up (computer use from a typed chat), they fade after
-//! UNATTENDED_FOR instead.
+//! Marks stay until the user takes them away: Esc once no answer is up (the first Esc closes the
+//! answer), or the Clear marks chip. Aloe can also replace them ("draw") or clear them. They
+//! outlive the answer they were drawn for and the user talking again, which may be about them.
 
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Mutex;
-use std::time::Duration;
 
 use serde::Serialize;
 use serde_json::{json, Value};
@@ -24,10 +21,6 @@ use crate::config::debug_log;
 
 /// The most marks kept at once, however many "add"s pile up.
 const MAX_MARKS: usize = 200;
-/// How long marks stay when no voice answer is on screen to fade with.
-const UNATTENDED_FOR: Duration = Duration::from_secs(30);
-/// Bumped by every change, so a fade timer only clears the marks it was started for.
-static VERSION: AtomicU64 = AtomicU64::new(0);
 
 #[derive(Debug, Clone, Serialize, Default)]
 #[serde(rename_all = "camelCase")]
@@ -84,17 +77,7 @@ pub async fn apply(app: &AppHandle, input: &Value) -> Result<Value, String> {
         // Where each mark landed, to compare with the locate_shot images.
         debug_log("voice", "drawing_marks", serde_json::to_string(&drawing.marks).unwrap_or_default());
     }
-    let version = VERSION.fetch_add(1, Ordering::SeqCst) + 1;
     push(app, &drawing);
-    if !overlay::is_showing() {
-        let app = app.clone();
-        tauri::async_runtime::spawn(async move {
-            tokio::time::sleep(UNATTENDED_FOR).await;
-            if VERSION.load(Ordering::SeqCst) == version && !overlay::is_showing() {
-                clear(&app);
-            }
-        });
-    }
     Ok(json!({ "shown": true, "marks": drawing.marks.len() }))
 }
 
@@ -107,7 +90,6 @@ pub fn clear(app: &AppHandle) {
         }
         *drawing = Drawing::default();
     }
-    VERSION.fetch_add(1, Ordering::SeqCst);
     push(app, &Drawing::default());
 }
 

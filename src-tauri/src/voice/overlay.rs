@@ -5,8 +5,9 @@
 //!
 //! The same rules as the desktop-control overlay (overlay.rs) apply, for the same reasons: created
 //! unfocused and never `show()`n again (that would activate it on Windows and steal the keyboard
-//! from the app the user is talking over), faded in and out by the page, content-protected so
-//! Aloe's own screenshots never contain it, and fed by `eval` rather than app events.
+//! from the app the user is talking over), faded in and out by the page, and fed by `eval` rather
+//! than app events. Unlike that pill it shows on screen shares and screenshots, so marks can be
+//! shown to others; only Aloe's own screenshots leave it out (`own_capture`).
 //!
 //! The window covers the display but is click-through everywhere except the island: the page
 //! reports the island's rectangle, and a watcher lets the window take the cursor only while the
@@ -16,7 +17,7 @@
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager, WebviewUrl, WebviewWindow, WebviewWindowBuilder};
@@ -162,10 +163,8 @@ pub fn show(app: &AppHandle, view: View) {
         // The island takes over (or hands back) the desktop-control pill.
         crate::overlay::sync_windows(app);
     }
-    if was_showing && !is_showing() {
-        // Marks belong to the answer they were drawn for: they fade with it.
-        super::drawing::clear(app);
-    }
+    // Marks outlive the answer they were drawn for: they stay until the user clears them
+    // (drawing.rs).
 }
 
 fn render(app: &AppHandle, mut view: View) {
@@ -332,9 +331,59 @@ fn overlay_window(app: &AppHandle, x: f64, y: f64, width: f64, height: f64) -> R
         .resizable(false)
         .always_on_top(true)
         .skip_taskbar(true)
-        .content_protected(true)
+        // Shown in screen shares and screenshots, except Aloe's own (see `own_capture`).
+        .content_protected(captures_running())
         .focused(false)
         .visible(true)
         .build()
         .map_err(|e| e.to_string())
+}
+
+/// Aloe's own screen captures running, and when the overlay was last taken out of captures.
+static OWN_CAPTURES: Mutex<(usize, Option<Instant>)> = Mutex::new((0, None));
+/// How long the system may take to stop drawing a window into captures once told to.
+const CAPTURE_SETTLE: Duration = Duration::from_millis(80);
+
+fn captures_running() -> bool {
+    OWN_CAPTURES.lock().unwrap_or_else(std::sync::PoisonError::into_inner).0 > 0
+}
+
+fn set_protected(app: &AppHandle, protected: bool) {
+    if let Some(window) = app.get_webview_window(STAGE_LABEL) {
+        let _ = window.set_content_protected(protected);
+    }
+}
+
+/// While held, the overlay is kept out of screen captures; dropping it puts the overlay back.
+pub struct OwnCapture(AppHandle);
+
+impl Drop for OwnCapture {
+    fn drop(&mut self) {
+        let mut captures = OWN_CAPTURES.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        captures.0 = captures.0.saturating_sub(1);
+        if captures.0 == 0 {
+            captures.1 = None;
+            set_protected(&self.0, false);
+        }
+    }
+}
+
+/// For Aloe's own screenshots (a voice turn's picture, placing marks, computer use): the overlay
+/// shows on screen shares and the user's screenshots, but Aloe must see the screen beneath it, not
+/// its own marks or island. Hold the guard for the length of the capture. Overlapping captures
+/// share one hiding; each waits until it has taken effect.
+pub async fn own_capture(app: &AppHandle) -> OwnCapture {
+    let wait = {
+        let mut captures = OWN_CAPTURES.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        captures.0 += 1;
+        let since = *captures.1.get_or_insert_with(|| {
+            set_protected(app, true);
+            Instant::now()
+        });
+        CAPTURE_SETTLE.saturating_sub(since.elapsed())
+    };
+    if !wait.is_zero() {
+        tokio::time::sleep(wait).await;
+    }
+    OwnCapture(app.clone())
 }

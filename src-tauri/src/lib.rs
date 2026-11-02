@@ -13,6 +13,7 @@ mod models;
 mod notifications;
 mod overlay;
 mod project;
+mod screen_fit;
 mod screen_grid;
 mod search;
 mod shell;

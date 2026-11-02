@@ -149,6 +149,11 @@ pub async fn call(app: &AppHandle, input: &Value, own_window: Option<OwnWindow>,
     }
 
     apply_cursor_theme(app, &session).await;
+    // The voice overlay shows on screen shares, but not in what the agent is shown of the screen.
+    let _hidden = match tool.as_str() {
+        "get_desktop_state" | "get_window_state" | "zoom" => Some(crate::voice::overlay::own_capture(app).await),
+        _ => None,
+    };
     let started = std::time::Instant::now();
     let result = request(app, "tools/call", json!({ "name": tool, "arguments": arguments })).await;
     let shaped = result.and_then(|result| shape_result(&result));
