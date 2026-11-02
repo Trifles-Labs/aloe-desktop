@@ -266,7 +266,7 @@ pub fn make_granted_folder(canonical: &std::path::Path) -> GrantedFolder {
     }
 }
 
-/// Re-reads every granted folder's MEMORY.md/AGENTS.md and refreshes `context` in place. Called
+/// Re-reads every granted folder's MEMORY.md/AGENTS.md/CLAUDE.md and refreshes `context` in place. Called
 /// at startup (so edits made while the app was closed are picked up) and after Aloe itself writes
 /// to one of those files mid-conversation (see executor.rs's post-write resync).
 pub fn rescan_folder_contexts(config: &mut AgentConfig) {

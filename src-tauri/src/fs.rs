@@ -90,12 +90,13 @@ fn truncate_str(value: &str, max_bytes: usize) -> String {
     format!("{}\n[truncated]", &value[..end])
 }
 
-/// Reads a granted folder's own MEMORY.md and AGENTS.md, if present, so their content can ride
-/// along the existing folder-sync path and be preloaded into the model's context without an
-/// explicit read_file call. Returns None when neither file exists (or both are empty), so a
-/// folder with no convention files contributes nothing.
+/// Reads a granted folder's own MEMORY.md, AGENTS.md and CLAUDE.md, if present, so their content
+/// can ride along the existing folder-sync path and be preloaded into the model's context without
+/// an explicit read_file call. CLAUDE.md is read so projects set up for Claude Code work as they
+/// are. Returns None when none of them exists (or all are empty), so a folder with no convention
+/// files contributes nothing.
 pub fn scan_folder_context(root: &Path) -> Option<String> {
-    let sections: Vec<String> = ["MEMORY.md", "AGENTS.md"]
+    let sections: Vec<String> = ["MEMORY.md", "AGENTS.md", "CLAUDE.md"]
         .into_iter()
         .filter_map(|name| {
             let content = fs::read_to_string(root.join(name)).ok()?;
@@ -739,6 +740,16 @@ mod tests {
         let memory_at = context.find("memory fact").expect("memory fact present");
         let agents_at = context.find("agent instruction").expect("agent instruction present");
         assert!(memory_at < agents_at, "MEMORY.md content should come before AGENTS.md content");
+    }
+
+    #[test]
+    fn scan_folder_context_reads_claude_md() {
+        let dir = temp_project("context_claude");
+        fs::write(dir.join("CLAUDE.md"), "Run `cargo test` before committing.").unwrap();
+
+        let context = scan_folder_context(&dir).expect("CLAUDE.md should be picked up");
+        assert!(context.contains("## CLAUDE.md"));
+        assert!(context.contains("cargo test"));
     }
 
     #[test]

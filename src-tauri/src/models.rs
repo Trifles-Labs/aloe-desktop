@@ -7,7 +7,7 @@ pub struct GrantedFolder {
     pub path: String,
     pub label: Option<String>,
     pub indexed_at: Option<String>,
-    /// The folder's own MEMORY.md / AGENTS.md content, if present — see fs::scan_folder_context.
+    /// The folder's own MEMORY.md / AGENTS.md / CLAUDE.md content, if present — see fs::scan_folder_context.
     /// `default` keeps deserialization of a config.json saved before this field existed working.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub context: Option<String>,

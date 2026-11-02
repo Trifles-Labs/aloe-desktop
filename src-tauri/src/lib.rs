@@ -696,7 +696,7 @@ async fn add_project_folder(app: AppHandle, state: State<'_, AppState>) -> Resul
 
 pub fn run() {
     let mut initial_config = load_config();
-    // Picks up edits made to a granted folder's MEMORY.md/AGENTS.md while the app was closed,
+    // Picks up edits made to a granted folder's MEMORY.md/AGENTS.md/CLAUDE.md while the app was closed,
     // so the very first sync after launch reflects the file's real current content.
     rescan_folder_contexts(&mut initial_config);
     debug_log(

@@ -24,7 +24,7 @@ use crate::terminal::{
     write_terminal_session,
 };
 
-/// Job kinds that can change a granted folder's MEMORY.md/AGENTS.md. A completed job of one of
+/// Job kinds that can change a granted folder's MEMORY.md/AGENTS.md/CLAUDE.md. A completed job of one of
 /// these kinds triggers a background re-scan + re-sync so "remember X for this project" is
 /// reflected on the very next turn instead of waiting for the app to restart.
 const FOLDER_CONTEXT_TRIGGER_KINDS: [&str; 6] =
