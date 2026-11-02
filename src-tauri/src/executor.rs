@@ -8,7 +8,7 @@ use tokio_tungstenite::tungstenite::Message;
 use crate::browser::dispatch_browser;
 use crate::code_tools::{glob_files, grep_files, write_text_file};
 use crate::computer::{capture_desktop_screenshot, dispatch_desktop_control};
-use crate::config::{add_recent, debug_log, rescan_folder_contexts, save_config, scoped_config, AppState, COMMAND_TIMEOUT_SECONDS};
+use crate::config::{add_recent, debug_log, rescan_folder_contexts, save_config, scoped_config, AppState, COMMAND_TIMEOUT_SECONDS, MAX_REMEMBERED_JOBS};
 use crate::fs::{
     apply_patch, assert_granted, attach_file, create_file, create_folder, delete_file,
     delete_folder, input_string, list_files, read_file, truncate_text, update_file, update_folder,
@@ -160,6 +160,17 @@ fn requires_command_approval(kind: &str) -> bool {
 pub async fn execute_job(app: AppHandle, job: AgentJob) {
     debug_log("job", "received", format!("job_id={} kind={}", job.id, job.kind));
     let state = app.state::<AppState>();
+    {
+        let mut started = state.started_jobs.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        if started.contains(&job.id) {
+            debug_log("job", "duplicate_ignored", format!("job_id={}", job.id));
+            return;
+        }
+        if started.len() >= MAX_REMEMBERED_JOBS {
+            started.clear();
+        }
+        started.insert(job.id.clone());
+    }
     // Folder scope for this job: device grants, plus anything the user shared with the conversation
     // this job came from. Resolved once here so every path check below — and every tool dispatched
     // from it — sees the same set. Never saved; see scoped_config in config.rs.

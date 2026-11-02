@@ -171,7 +171,7 @@ async fn run_connected_loop(
         tokio::select! {
             _ = heartbeat.tick() => {
                 let current = app.state::<AppState>().config.lock()
-                    .expect("config mutex").credential.clone();
+                    .unwrap_or_else(std::sync::PoisonError::into_inner).credential.clone();
                 if current.as_deref() != Some(credential) {
                     debug_log("socket", "closing_after_logout", format!("fp={fp}"));
                     let _ = write.close().await;

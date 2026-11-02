@@ -1,7 +1,7 @@
 use chrono::Utc;
 use reqwest::Client;
 use sha2::{Digest, Sha256};
-use std::{collections::HashMap, fs, path::PathBuf, sync::Mutex};
+use std::{collections::{HashMap, HashSet}, fs, path::PathBuf, sync::Mutex};
 use tokio::sync::mpsc::UnboundedSender;
 use tokio_tungstenite::tungstenite::Message;
 
@@ -108,7 +108,14 @@ pub struct AppState {
     /// queue_for_approval) push a message onto the live connection. Best-effort: a
     /// message sent while this is `None` (or the send fails) is simply not synced yet.
     pub outbound: Mutex<Option<UnboundedSender<Message>>>,
+    /// Job ids this process has already started. A job pushed over the socket can come back in the
+    /// queue drain that follows a reconnect; without this it would run a second time.
+    pub started_jobs: Mutex<HashSet<String>>,
 }
+
+/// Past this many remembered job ids the set is cleared. A duplicate only ever arrives within
+/// seconds of the original, so forgetting old ids loses nothing.
+pub const MAX_REMEMBERED_JOBS: usize = 2_000;
 
 pub fn normalize_api_url(raw: &str) -> String {
     raw.trim()
@@ -182,7 +189,10 @@ pub fn load_config() -> AgentConfig {
         // context — an existing config.json still on the old value reads as "auto" from here on.
         config.command_trust_mode = "auto".to_string();
     } else if !matches!(config.command_trust_mode.as_str(), "ask" | "auto" | "all") {
-        config.command_trust_mode = "auto".to_string();
+        // An unrecognised value (hand-edited or corrupted config) falls back to the strictest
+        // mode, never to one that runs commands unattended.
+        config.command_trust_mode = "ask".to_string();
+        config.always_allow_commands = false;
     }
     config.voice = config.voice.clone().normalized();
     for session in &mut config.terminal_sessions {

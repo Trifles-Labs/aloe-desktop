@@ -23,7 +23,7 @@ mod voice;
 mod workbench;
 
 use serde_json::json;
-use std::{collections::HashMap, fs as std_fs, sync::Mutex};
+use std::{collections::{HashMap, HashSet}, fs as std_fs, sync::Mutex};
 use tauri::{AppHandle, Emitter, Manager, State};
 use tauri_plugin_autostart::{MacosLauncher, ManagerExt};
 use tauri_plugin_deep_link::DeepLinkExt;
@@ -752,6 +752,7 @@ pub fn run() {
             terminals: Mutex::new(HashMap::new()),
             client: reqwest::Client::new(),
             outbound: Mutex::new(None),
+            started_jobs: Mutex::new(HashSet::new()),
         })
         .invoke_handler(tauri::generate_handler![
             get_config,

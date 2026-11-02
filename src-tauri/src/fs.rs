@@ -25,7 +25,11 @@ fn canonicalize_existing_or_parent(path: &Path) -> Result<PathBuf, String> {
 pub fn assert_granted(config: &AgentConfig, raw_path: &str) -> Result<PathBuf, String> {
     let target = canonicalize_existing_or_parent(Path::new(raw_path))?;
     for folder in &config.folders {
-        let root = fs::canonicalize(&folder.path).map_err(|e| e.to_string())?;
+        // A granted folder that is gone (deleted, renamed, drive unplugged) simply can't match;
+        // it must not make paths in every other granted folder fail too.
+        let Ok(root) = fs::canonicalize(&folder.path) else {
+            continue;
+        };
         if target == root || target.starts_with(&root) {
             return Ok(target);
         }
