@@ -442,18 +442,20 @@ fn voice_overlay_state() -> voice::overlay::View {
 }
 
 /// The voice tour (intro.html): a frameless, transparent window centred on the screen, floating
-/// over whatever is open. A second call brings the open one forward. Async because building a
-/// window from a synchronous command deadlocks on Windows.
+/// over whatever is open. A second call brings the open one forward. It starts hidden and the page
+/// shows it once the card is drawn, so a slow load never leaves an invisible window taking clicks.
+/// Async because building a window from a synchronous command deadlocks on Windows.
 #[tauri::command]
 async fn open_voice_intro(app: AppHandle) -> Result<(), String> {
     if let Some(window) = app.get_webview_window(voice::overlay::INTRO_LABEL) {
+        let _ = window.show();
         let _ = window.unminimize();
         let _ = window.set_focus();
         return Ok(());
     }
     tauri::WebviewWindowBuilder::new(&app, voice::overlay::INTRO_LABEL, tauri::WebviewUrl::App("intro.html".into()))
         .title("Meet Aloe voice")
-        .inner_size(740.0, 660.0)
+        .inner_size(716.0, 636.0)
         .center()
         .transparent(true)
         .decorations(false)
@@ -461,10 +463,19 @@ async fn open_voice_intro(app: AppHandle) -> Result<(), String> {
         .resizable(false)
         .always_on_top(true)
         .focused(true)
-        .visible(true)
+        .visible(false)
         .build()
         .map(|_| ())
         .map_err(|e| e.to_string())
+}
+
+/// Ends the voice tour. Destroys rather than closes, so the main window's hide-to-tray close
+/// handling can never keep the transparent window alive.
+#[tauri::command]
+fn close_voice_intro(app: AppHandle) {
+    if let Some(window) = app.get_webview_window(voice::overlay::INTRO_LABEL) {
+        let _ = window.destroy();
+    }
 }
 
 /// False on macOS until Input Monitoring is allowed (and always off Windows and macOS).
@@ -767,6 +778,7 @@ pub fn run() {
             voice_overlay_drawing,
             voice_hotkey_allowed,
             open_voice_intro,
+            close_voice_intro,
             sync_folders,
             add_folder,
             remove_folder,
@@ -856,7 +868,11 @@ pub fn run() {
         .on_menu_event(|app, event| desktop::handle_menu_event(app, event.id().as_ref()))
         .on_tray_icon_event(desktop::handle_tray_event)
         .on_window_event(|window, event| {
+            // Only the main window hides to the tray; every other window closes for real.
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                if window.label() != "main" {
+                    return;
+                }
                 api.prevent_close();
                 desktop::hide_main_window(window.app_handle());
             }

@@ -406,6 +406,9 @@ function CommandsDemo({ active, onFrame }: { active: boolean; onFrame: (frame: n
 
 type LiveState = "waiting" | "listening" | "heard";
 
+/** The try-it step's index in the tour's steps. */
+const LAST_STEP = 4;
+
 function TryIt({ config, keys, setConfig, live }: { config: AgentConfig; keys: Keys; setConfig: (config: AgentConfig) => void; live: LiveState }) {
   const [held, setHeld] = useState<[boolean, boolean]>([false, false]);
   const [allowed, setAllowed] = useState(true);
@@ -530,10 +533,12 @@ export function VoiceIntroLauncher({ platform }: { platform: string }) {
 
   useEffect(() => {
     if (!supported || pathname.startsWith("/app/onboarding") || seen()) return;
+    let opening = false;
     const open = () => {
-      if (document.hidden || seen()) return;
-      markSeen();
-      void invoke("open_voice_intro");
+      if (opening || document.hidden || seen()) return;
+      opening = true;
+      // Seen only once the window really opened, so a failed open tries again next launch.
+      invoke("open_voice_intro").then(markSeen, () => (opening = false));
     };
     open();
     document.addEventListener("visibilitychange", open);
@@ -566,14 +571,19 @@ export function VoiceTour({ config, setConfig, onClose }: Props) {
   const [live, setLive] = useState<LiveState>("waiting");
   const [commandFrame, setCommandFrame] = useState(0);
   const nextRef = useRef<HTMLButtonElement>(null);
+  const stepRef = useRef(step);
+  stepRef.current = step;
+  const closedRef = useRef(false);
 
   const keys = keysFor(config.platform);
 
-  /* The real overlay reports its phase; the first "listening" on the last step is the win. */
+  /* The real overlay reports its phase; the first "listening" on the last step is the win. Using
+     voice on an earlier step doesn't count, or the last step would open already finished. */
   useEffect(() => {
     let unlisten: (() => void) | undefined;
     let cancelled = false;
     void listen<string>("voice-phase", (event) => {
+      if (stepRef.current !== LAST_STEP) return;
       const phase = event.payload;
       setLive((current) => {
         if (current === "heard") return current;
@@ -589,7 +599,17 @@ export function VoiceTour({ config, setConfig, onClose }: Props) {
     };
   }, []);
 
-  const close = useCallback(() => setShown(false), []);
+  /* Closes once, after the exit animation. The timer is the fallback for when the animation never
+     finishes (an occluded webview can stop drawing frames), so the window can't outlive the card. */
+  const finish = useCallback(() => {
+    if (closedRef.current) return;
+    closedRef.current = true;
+    onClose();
+  }, [onClose]);
+  const close = useCallback(() => {
+    setShown(false);
+    window.setTimeout(finish, 400);
+  }, [finish]);
 
   const steps: Array<{ eyebrow: string; title: string; body: ReactNode; demo: ReactNode }> = [
     {
@@ -671,8 +691,8 @@ export function VoiceTour({ config, setConfig, onClose }: Props) {
   const slide = reduceMotion ? 0 : 24;
 
   return (
-    <div className="grid h-screen w-screen place-items-center p-6">
-      <AnimatePresence onExitComplete={onClose}>
+    <div className="grid h-screen w-screen place-items-center p-3">
+      <AnimatePresence onExitComplete={finish}>
         {shown && (
           <motion.div
             key="card"
