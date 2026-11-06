@@ -144,6 +144,9 @@ fn backoff(current_ms: u64) -> u64 {
     (current_ms * 2).min(SOCKET_RECONNECT_MAX_MS)
 }
 
+/// How many heartbeats between rescans of ~/.agents/skills: about every 30 seconds.
+const LOCAL_SKILL_RESCAN_TICKS: u64 = 6;
+
 async fn run_connected_loop(
     app: &AppHandle,
     socket: tokio_tungstenite::WebSocketStream<
@@ -157,6 +160,11 @@ async fn run_connected_loop(
     let _ = write.send(Message::Text(json!({ "type": "hello", "commandTrustMode": command_trust_mode }).to_string().into())).await;
     let mut heartbeat = tokio::time::interval(Duration::from_millis(SOCKET_HEARTBEAT_MS));
     heartbeat.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    // The names and descriptions of the skills in ~/.agents/skills (local_skills.rs), sent on
+    // connect and again whenever a rescan finds them changed, so chats from this computer list them.
+    let mut local_skill_index = crate::local_skills::index_message(&crate::local_skills::scan()).to_string();
+    let _ = write.send(Message::Text(local_skill_index.clone().into())).await;
+    let mut ticks: u64 = 0;
 
     // Lets code outside this loop (queue_for_approval, on the executor side) push a message onto
     // this specific live connection — e.g. syncing a newly queued local-command approval to the
@@ -180,6 +188,14 @@ async fn run_connected_loop(
                 if write.send(Message::Text(json!({ "type": "heartbeat" }).to_string().into())).await.is_err() {
                     set_socket_state(app, "reconnecting", Some("Heartbeat failed.".to_string()));
                     return;
+                }
+                ticks += 1;
+                if ticks % LOCAL_SKILL_RESCAN_TICKS == 0 {
+                    let index = crate::local_skills::index_message(&crate::local_skills::scan()).to_string();
+                    if index != local_skill_index {
+                        local_skill_index = index;
+                        let _ = write.send(Message::Text(local_skill_index.clone().into())).await;
+                    }
                 }
             }
             Some(message) = outbound_rx.recv() => {

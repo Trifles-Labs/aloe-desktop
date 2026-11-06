@@ -152,6 +152,18 @@ pub async fn post_result(
 
 // ── Job dispatch ──────────────────────────────────────────────────────────────
 
+/// Saving or removing a skill in ~/.agents/skills (local_skills.rs). Other agents on this computer
+/// read that folder, so these always ask, in every trust mode.
+fn always_asks(kind: &str) -> bool {
+    matches!(kind, "write_local_skill" | "remove_local_skill")
+}
+
+/// Sends this computer's skill index to the backend now, after a save or removal changed it,
+/// rather than waiting for the socket's next rescan.
+fn push_local_skill_index(state: &tauri::State<'_, AppState>) {
+    crate::local_skills::push_index(state, &crate::local_skills::scan());
+}
+
 /// Job kinds that run something on the user's machine, and so go through the command-trust gate.
 fn requires_command_approval(kind: &str) -> bool {
     matches!(kind, "run_command" | "run_local_command" | "start_terminal_session" | "write_terminal_session" | "run_skill_script")
@@ -179,6 +191,11 @@ pub async fn execute_job(app: AppHandle, job: AgentJob) {
     // model to judge this specific command against the conversation it came from) says otherwise.
     // Input typed into a running terminal session counts as a command too: approving `python` or a
     // shell must not let everything sent to it afterwards run unseen.
+    if always_asks(&job.kind) {
+        queue_for_approval(&state, &app, job);
+        return;
+    }
+
     if requires_command_approval(&job.kind) {
         // A version of a skill bundle that hasn't run here before always asks, whatever the mode:
         // it is code from wherever the skill came from, not a command Aloe wrote (skills.rs).
@@ -331,6 +348,8 @@ fn queue_for_approval(state: &tauri::State<AppState>, app: &AppHandle, job: Agen
             Some(session) => (text, session.cwd, format!("Aloe wants to type this into the running terminal session `{}`.", session.command)),
             None => (text, String::new(), "Aloe wants to type this into a running terminal session.".to_string()),
         }
+    } else if always_asks(&job.kind) {
+        crate::local_skills::approval_summary(&job.kind, &job.input)
     } else if job.kind == "run_skill_script" {
         let first_run = !crate::skills::is_trusted(&state.config.lock().unwrap_or_else(std::sync::PoisonError::into_inner), &job.input);
         (
@@ -352,7 +371,7 @@ fn queue_for_approval(state: &tauri::State<AppState>, app: &AppHandle, job: Agen
         command,
         cwd,
         // A skill script's reason is always this device's own: it says whether this is a first run.
-        reason: if job.kind == "run_skill_script" { default_reason } else { input_string(&job.input, "reason").unwrap_or(default_reason) },
+        reason: if job.kind == "run_skill_script" || always_asks(&job.kind) { default_reason } else { input_string(&job.input, "reason").unwrap_or(default_reason) },
         requested_at: Utc::now().to_rfc3339(),
         input: job.input,
     };
@@ -362,10 +381,16 @@ fn queue_for_approval(state: &tauri::State<AppState>, app: &AppHandle, job: Agen
     // page alongside email/calendar/GitHub actions — not just in this device's own panel.
     // Best-effort: if the socket isn't up right now, the row simply doesn't exist remotely yet.
     if let Some(sender) = state.outbound.lock().unwrap_or_else(std::sync::PoisonError::into_inner).as_ref() {
+        // A local skill script's source goes on the approval card (the backend has no copy of it);
+        // the spoken reason stays short.
+        let card_reason = match crate::skills::local_script_preview(&pending.input) {
+            Some(source) if pending.job_kind == "run_skill_script" => format!("{}\n\nThe script:\n{source}", pending.reason),
+            _ => pending.reason.clone(),
+        };
         let sync_message = json!({
             "type": "approval_requested",
             "jobId": pending.job_id.clone(),
-            "reason": pending.reason.clone(),
+            "reason": card_reason,
             "command": pending.command.clone(),
             "cwd": pending.cwd.clone(),
         });
@@ -425,6 +450,9 @@ pub async fn resolve_pending_approval(app: &AppHandle, job_id: &str, approved: b
     post_result(&state, &config, &pending.job_id, status, output.clone(), error.clone()).await;
     record_and_emit(app, &state, &pending.job_id, &pending.job_kind, status, error.as_deref(), Some(input_val), output);
     maybe_resync_folder_context(app, &pending.job_kind, status);
+    if always_asks(&pending.job_kind) && status == "completed" {
+        push_local_skill_index(&state);
+    }
     Ok(())
 }
 
@@ -472,6 +500,10 @@ async fn run_tool(
         "run_command"            => run_command(config.clone(), job.input.clone()).await,
         "run_local_command"      => run_command(config.clone(), job.input.clone()).await,
         "run_skill_script"       => crate::skills::run_skill_script(&state.client, config, &job.id, &job.input).await,
+        // Skills in ~/.agents/skills (local_skills.rs). Saving and removing only run once approved.
+        "read_local_skill"       => crate::local_skills::read_local_skill(&job.input),
+        "write_local_skill"      => crate::local_skills::write_local_skill(&job.input),
+        "remove_local_skill"     => crate::local_skills::remove_local_skill(&job.input),
         "start_terminal_session" => start_terminal_session(state, config.clone(), job.input.clone(), Some(app), job.conversation_id.clone()).await,
         "read_terminal_session"  => read_terminal_session(state, job.input.clone()).await,
         "write_terminal_session" => write_terminal_session(state, job.input.clone()).await,
@@ -479,6 +511,8 @@ async fn run_tool(
         "list_terminal_sessions" => list_terminal_sessions(state).await,
         "wait_terminal_session"  => wait_terminal_session(state, job.input.clone()).await,
         "open_local_url"         => open_local_url(&job.input).await,
+        // The native folder picker, titled with Aloe's reason; the user's pick becomes a grant.
+        "request_folder_access"  => crate::folder_access::request_folder_access(app, &job.input).await,
         "capture_desktop_screenshot" => capture_desktop_screenshot(app).await,
         "capture_screen_region"  => crate::computer::capture_screen_region(app, &job.input).await,
         "fit_screen_box"         => crate::computer::fit_screen_box(app, &job.input).await,
@@ -618,6 +652,13 @@ mod tests {
         ] {
             assert!(checked_open_url(url).is_err(), "should refuse {url}");
         }
+    }
+
+    #[test]
+    fn saving_or_removing_a_skill_always_asks() {
+        assert!(always_asks("write_local_skill"));
+        assert!(always_asks("remove_local_skill"));
+        assert!(!always_asks("read_local_skill"));
     }
 
     #[test]

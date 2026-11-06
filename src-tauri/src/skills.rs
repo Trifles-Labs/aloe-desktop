@@ -8,6 +8,9 @@
 //! run of each version of a bundle always asks the user, whatever the trust mode (see `execute_job`);
 //! approving it records the hash in `AgentConfig::trusted_skill_bundles`, and later runs of the same
 //! version follow the normal command rules.
+//!
+//! A job with `local: true` runs a script from a skill in ~/.agents/skills instead (local_skills.rs):
+//! nothing is downloaded, and the trust key is the skill's folder, pinned to a hash of its files.
 
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
@@ -51,12 +54,12 @@ fn hex(bytes: &[u8]) -> String {
     bytes.iter().map(|b| format!("{b:02x}")).collect()
 }
 
-fn sha256_hex(bytes: &[u8]) -> String {
+pub(crate) fn sha256_hex(bytes: &[u8]) -> String {
     hex(&Sha256::digest(bytes))
 }
 
 /// A bundle path as a relative path of plain names only: no root, no drive, no `.` or `..`.
-fn safe_relative_path(raw: &str) -> Option<PathBuf> {
+pub(crate) fn safe_relative_path(raw: &str) -> Option<PathBuf> {
     if raw.is_empty() || raw.contains('\\') || raw.contains(':') {
         return None;
     }
@@ -141,20 +144,45 @@ fn parse_run(input: &Value) -> Result<SkillRun, String> {
     })
 }
 
-pub fn is_trusted(config: &AgentConfig, input: &Value) -> bool {
+fn is_local(input: &Value) -> bool {
+    input.get("local").and_then(Value::as_bool).unwrap_or(false)
+}
+
+/// The trust entry a run would need: a key for the skill and the hash of its current files.
+fn trust_entry(input: &Value) -> Option<(String, String)> {
+    if is_local(input) {
+        let skill = crate::local_skills::find(&text(input, "skillName"))?;
+        let hash = crate::local_skills::content_hash(&skill.dir)?;
+        return Some((format!("local:{}", skill.dir.to_string_lossy().to_lowercase()), hash));
+    }
     let skill_id = text(input, "skillId");
     let hash = text(input, "bundleHash").to_ascii_lowercase();
-    !hash.is_empty() && config.trusted_skill_bundles.get(&skill_id) == Some(&hash)
+    (is_hex(&skill_id, 24) && is_hex(&hash, 64)).then_some((skill_id, hash))
+}
+
+pub fn is_trusted(config: &AgentConfig, input: &Value) -> bool {
+    trust_entry(input).is_some_and(|(key, hash)| config.trusted_skill_bundles.get(&key) == Some(&hash))
 }
 
 /// Called when the user approves a run: later runs of this exact version need no first-run ask.
 /// One entry per skill, so approving a new version replaces the old one.
 pub fn trust(config: &mut AgentConfig, input: &Value) {
-    let skill_id = text(input, "skillId");
-    let hash = text(input, "bundleHash").to_ascii_lowercase();
-    if is_hex(&skill_id, 24) && is_hex(&hash, 64) {
-        config.trusted_skill_bundles.insert(skill_id, hash);
+    if let Some((key, hash)) = trust_entry(input) {
+        config.trusted_skill_bundles.insert(key, hash);
     }
+}
+
+/// A local skill script's source, for the approval card in the approvals queue (a bundled
+/// script's source travels on the job from the backend instead).
+pub fn local_script_preview(input: &Value) -> Option<String> {
+    if !is_local(input) {
+        return None;
+    }
+    let skill = crate::local_skills::find(&text(input, "skillName"))?;
+    let source = std::fs::read_to_string(skill.dir.join(safe_relative_path(&text(input, "script"))?)).ok()?;
+    let cut: String = source.chars().take(4_000).collect();
+    Some(if cut.len() < source.len() { format!("{cut}
+…") } else { cut })
 }
 
 /// What the approval prompt shows and voice reads out. The script's source is on the approval card
@@ -258,9 +286,12 @@ fn interpreter_for(script: &str) -> Result<(&'static str, Vec<&'static str>), St
 }
 
 pub async fn run_skill_script(client: &reqwest::Client, config: &AgentConfig, job_id: &str, input: &Value) -> Result<Value, String> {
+    if is_local(input) {
+        return run_local_skill_script(config, input).await;
+    }
     let run = parse_run(input)?;
     let cwd = assert_granted(config, &run.cwd)?;
-    let (program, leading_args) = interpreter_for(&run.script)?;
+    interpreter_for(&run.script)?;
     let dir = ensure_bundle(client, config, job_id, &run).await?;
 
     // Checked again right before running: the copy on disk is what the user approved.
@@ -272,13 +303,39 @@ pub async fn run_skill_script(client: &reqwest::Client, config: &AgentConfig, jo
         return Err(format!("{} changed on disk since it was downloaded, so it did not run. Try again to download it fresh.", run.script));
     }
 
+    run_script(&run.skill_name, &run.script, &script_path, &dir, &run.args, &cwd).await
+}
+
+/// A script from a skill in ~/.agents/skills, run in place from the skill's own folder.
+async fn run_local_skill_script(config: &AgentConfig, input: &Value) -> Result<Value, String> {
+    let name = text(input, "skillName");
+    let skill = crate::local_skills::find(&name).ok_or_else(|| format!("No skill named \"{name}\" on this computer."))?;
+    let script = text(input, "script").replace('\\', "/");
+    let script_path = skill.dir.join(safe_relative_path(&script).ok_or("That is not a path inside the skill.")?);
+    if !script_path.is_file() {
+        return Err(format!("\"{script}\" is not a file in the skill \"{}\".", skill.name));
+    }
+    let cwd = assert_granted(config, &text(input, "cwd"))?;
+    let args: Vec<String> = match input.get("args") {
+        None | Some(Value::Null) => Vec::new(),
+        Some(Value::Array(items)) => items.iter().map(|item| item.as_str().map(str::to_string).ok_or("Script arguments must be strings.")).collect::<Result<_, _>>()?,
+        Some(_) => return Err("Script arguments must be a list of strings.".to_string()),
+    };
+    if args.len() > MAX_ARGS {
+        return Err("Too many script arguments.".to_string());
+    }
+    run_script(&skill.name, &script, &script_path, &skill.dir, &args, &cwd).await
+}
+
+async fn run_script(skill_name: &str, script: &str, script_path: &Path, skill_dir: &Path, args: &[String], cwd: &Path) -> Result<Value, String> {
+    let (program, leading_args) = interpreter_for(script)?;
     let mut process = Command::new(program);
     process
         .args(&leading_args)
-        .arg(&script_path)
-        .args(&run.args)
-        .current_dir(&cwd)
-        .env("ALOE_SKILL_DIR", &dir)
+        .arg(script_path)
+        .args(args)
+        .current_dir(cwd)
+        .env("ALOE_SKILL_DIR", skill_dir)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -287,18 +344,18 @@ pub async fn run_skill_script(client: &reqwest::Client, config: &AgentConfig, jo
 
     let output = tokio::time::timeout(Duration::from_secs(COMMAND_TIMEOUT_SECONDS), process.output())
         .await
-        .map_err(|_| format!("{} timed out after {COMMAND_TIMEOUT_SECONDS} seconds.", run.script))?
+        .map_err(|_| format!("{script} timed out after {COMMAND_TIMEOUT_SECONDS} seconds."))?
         .map_err(|e| {
             if e.kind() == std::io::ErrorKind::NotFound {
-                format!("{program} is not installed or not on PATH, so {} can't run. Tell the user what to install.", run.script)
+                format!("{program} is not installed or not on PATH, so {script} can't run. Tell the user what to install.")
             } else {
                 e.to_string()
             }
         })?;
 
     Ok(json!({
-        "skill": run.skill_name,
-        "script": run.script,
+        "skill": skill_name,
+        "script": script,
         "cwd": cwd.to_string_lossy(),
         "exitCode": output.status.code(),
         "stdout": truncate_text(String::from_utf8_lossy(&output.stdout).to_string()),

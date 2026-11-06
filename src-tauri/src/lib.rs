@@ -8,6 +8,7 @@ mod cua;
 mod cursor;
 mod desktop;
 mod executor;
+mod folder_access;
 mod fs;
 mod models;
 mod notifications;
@@ -16,6 +17,7 @@ mod project;
 mod screen_fit;
 mod screen_grid;
 mod search;
+mod local_skills;
 mod shell;
 mod skills;
 mod socket;
@@ -802,6 +804,9 @@ pub fn run() {
             code_list_dir,
             code_read_file,
             code_write_file,
+            local_skills::local_skills_list,
+            local_skills::local_skills_refresh,
+            local_skills::local_skills_open_folder,
             updater::download_update,
             updater::install_update,
         ])

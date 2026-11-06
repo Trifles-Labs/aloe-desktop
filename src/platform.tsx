@@ -6,12 +6,13 @@
    chats sent from here. */
 
 import { useCallback, useMemo, useRef, useState } from "react";
+import { invoke } from "@tauri-apps/api/core";
 import { Monitor } from "lucide-react";
 
 import { configureApiClient } from "@aloe/ui/lib/api";
 import { isLocalChatId } from "@aloe/ui/lib/local_code_chats";
 import type { Platform } from "@aloe/ui/lib/platform";
-import type { User } from "@aloe/ui/lib/types";
+import type { LocalSkillSummary, User } from "@aloe/ui/lib/types";
 import DesktopConnectModal from "./components/DesktopConnectModal";
 import { localCodeStore } from "./code/chatStore";
 import { isCodeSession } from "./code/sessions";
@@ -61,6 +62,12 @@ export function useDesktopPlatform(config: AgentConfig, onSignOut: () => void) {
       hideConversation: (id) => isCodeSession(id) || isLocalChatId(id),
       // ...and kept only on this computer; the server stores none of them.
       codeStore: localCodeStore,
+      // Skills in ~/.agents/skills and Claude Code's and Codex's skill folders (local_skills.rs).
+      localSkills: {
+        list: () => invoke<LocalSkillSummary[]>("local_skills_list"),
+        refresh: () => invoke<LocalSkillSummary[]>("local_skills_refresh"),
+        openFolder: () => invoke<void>("local_skills_open_folder"),
+      },
     }),
     [readStoredUser, signOut, interceptOAuthConnect],
   );

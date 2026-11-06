@@ -32,6 +32,7 @@ src-tauri/src/        Rust runtime:
   voice/                  hotkey, audio capture, realtime/relay STT, speech, overlay, latency
   code_chats.rs code_tools.rs project.rs workbench.rs changes.rs   Aloe Code
   skills.rs               Skill bundle scripts: download by hash, first run of each version always asks
+  local_skills.rs         Skills in ~/.agents/skills (shared with other agents): index to backend, read/save/remove
   config.rs updater.rs notifications.rs
 UPDATER.md            Release and auto-update process
 build_release.py     Release build helper

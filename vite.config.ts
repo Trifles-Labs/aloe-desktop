@@ -77,6 +77,10 @@ console.error = (...args) => { send(args.map((a) => a?.stack ?? (typeof a === "s
         "clsx", "framer-motion", "lucide-react", "next-themes", "qrcode.react",
         "react-icons", "react-icons/fc", "react-icons/pi", "react-icons/si",
         "katex", "katex/contrib/mhchem", "react-markdown", "rehype-katex", "remark-gfm", "remark-math", "tailwind-merge",
+        // Code-block highlighting (aloe-ui's components/chat/highlight.ts): the core and every language it registers.
+        "highlight.js/lib/core",
+        ...["bash", "c", "cpp", "css", "diff", "go", "java", "javascript", "json", "markdown", "python", "rust", "sql", "typescript", "xml", "yaml"]
+          .map((language) => `highlight.js/lib/languages/${language}`),
       ],
       // Shipped as TypeScript source; served as source so the next/* aliases above apply to it.
       exclude: ["@aloe/ui"],
