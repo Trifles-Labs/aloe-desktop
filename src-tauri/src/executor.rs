@@ -197,6 +197,16 @@ pub async fn execute_job(app: AppHandle, job: AgentJob) {
     }
 
     if requires_command_approval(&job.kind) {
+        // A skill script whose interpreter isn't installed can never run. Say so now, rather than
+        // queueing an approval card that the user approves and then watches fail.
+        if job.kind == "run_skill_script" {
+            if let Err(problem) = crate::skills::preflight(&job.input) {
+                let input_snapshot = job.input.clone();
+                post_result(&state, &config, &job.id, "failed", None, Some(problem.clone())).await;
+                record_and_emit(&app, &state, &job.id, &job.kind, "failed", Some(&problem), Some(input_snapshot), None);
+                return;
+            }
+        }
         // A version of a skill bundle that hasn't run here before always asks, whatever the mode:
         // it is code from wherever the skill came from, not a command Aloe wrote (skills.rs).
         if job.kind == "run_skill_script" && !crate::skills::is_trusted(&config, &job.input) {
@@ -313,9 +323,10 @@ fn record_and_emit(
 /// that can act on it: the model can say what happened, propose a narrower command, or ask the
 /// user directly, all within the same turn.
 ///
-/// The cost is that "auto" no longer offers a way to approve something the judge rejected. That is
-/// what makes the wording of the judge's own prompt load-bearing — see `buildPrompt` in the
-/// backend's command_safety.ts, which tells it a NOT-safe verdict stops the command.
+/// A refusal is not final for the user: the model relays the reason, and if they approve the
+/// command in the conversation, the retry is judged with their approval in the transcript. That is
+/// why the message asks the model to offer a retry rather than to give up — see `buildPrompt` in
+/// the backend's command_safety.ts, where a user's own message is what authorizes a command.
 async fn reject_command(
     app: &AppHandle,
     state: &tauri::State<'_, AppState>,
@@ -325,9 +336,11 @@ async fn reject_command(
 ) {
     let input_snapshot = job.input.clone();
     let error = format!(
-        "Aloe Desktop refused to run this command. Its safety check declined it: {reason} \
-         Do not retry the same command or route it through another tool. Tell the user what was \
-         blocked and why, and either propose a narrower command or ask them to run it themselves."
+        "Aloe Desktop's safety check declined this command: {reason} \
+         It did not run. Tell the user plainly what was blocked and why, and ask whether they want it \
+         run anyway. If they approve it in the conversation, run the same command once more: the check \
+         weighs the user's own messages, so their message is what authorizes it. Do not retry it \
+         unprompted, and do not re-express it through another tool to get around the check."
     );
     post_result(state, config, &job.id, "denied", None, Some(error.clone())).await;
     record_and_emit(app, state, &job.id, &job.kind, "denied", Some(&error), Some(input_snapshot), None);

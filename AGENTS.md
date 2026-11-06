@@ -31,7 +31,7 @@ src-tauri/src/        Rust runtime:
   cua.rs computer.rs      Desktop control through bundled Cua Driver
   voice/                  hotkey, audio capture, realtime/relay STT, speech, overlay, latency
   code_chats.rs code_tools.rs project.rs workbench.rs changes.rs   Aloe Code
-  skills.rs               Skill bundle scripts: download by hash, first run of each version always asks
+  skills.rs               Skill bundle scripts: download by hash, first run of each version always asks; resolves the interpreter it can actually find (python/py -3, node/bun, bash, powershell/pwsh) before asking to run
   local_skills.rs         Skills in ~/.agents/skills (shared with other agents): index to backend, read/save/remove
   config.rs updater.rs notifications.rs
 UPDATER.md            Release and auto-update process
@@ -42,8 +42,8 @@ build_release.py     Release build helper
 
 - **Enforcement lives here.** Folder grants (device-wide and per-chat), sensitive-path write rules (`.git/`, `node_modules/`, build output, `.env`, keys) and command approval modes (`ask` / `auto` / `all`) are checked in Rust on every job. Never trust the job as the backend sent it. A job naming a conversation it wasn't granted must still fail.
 - The browser/UI never names a path; it can only ask for the native folder dialog and be told the result.
-- `auto` mode: the model judge is the only gate, a refusal returns the judge's reason as the tool error and does not enter the approval queue; a failed check (network, timeout, unparseable) falls back to the approval queue instead of refusing.
-- Skill scripts (`run_skill_script`, `skills.rs`): the first run of each version of a skill bundle always goes to the approval queue, in every trust mode. Approving it pins that bundle hash in `trustedSkillBundles`; later runs follow the normal mode. Every file is checked against its sha256, and the script is run directly, not through a shell.
+- `auto` mode: the model judge is the only gate, a refusal returns the judge's reason as the tool error and does not enter the approval queue; a failed check (network, timeout, unparseable) falls back to the approval queue instead of refusing. A refusal is not final for the user: the model relays the reason, and if they approve the command in the conversation, the retry is judged again with their message in the transcript (see the judge prompt in `lib/tools/command_safety.ts`).
+- Skill scripts (`run_skill_script`, `skills.rs`): the first run of each version of a skill bundle always goes to the approval queue, in every trust mode. Approving it pins that bundle hash in `trustedSkillBundles`; later runs follow the normal mode. Every file is checked against its sha256, and the script is run directly, not through a shell. A script whose interpreter is not installed fails before the approval card is shown, and Python runs get UTF-8 (`PYTHONUTF8=1`) because the Windows default code page turns one curly quote into a crash.
 - Cua filtering (`cua.rs`): allowlisted tools only, never Aloe's own windows, no file writes, `launch_app` by name only. Keep Cua telemetry off (`DO_NOT_TRACK=1`).
 - Browser automation is not gated by command approvals; page content is untrusted. Chrome is never launched headless.
 - **Voice:** hold Left Ctrl + Left Alt for 200 ms with nothing else pressed. The overlay never takes focus and is excluded from Aloe's own screenshots. Mic audio is captured in Rust and never sent to our backend (except through the Sarvam relay stream). Windows and macOS only for now.

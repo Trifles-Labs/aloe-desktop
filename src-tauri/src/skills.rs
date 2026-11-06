@@ -270,19 +270,86 @@ async fn ensure_bundle(client: &reqwest::Client, config: &AgentConfig, job_id: &
     }
 }
 
+/// A program that can run a skill script, and the arguments that go before the script's path.
+struct Interpreter {
+    program: String,
+    leading_args: Vec<String>,
+}
+
+/// Finds a program on PATH, trying the Windows executable extensions too. A name being present is
+/// not proof it works (the Windows Store `python` stub is a real file that only prints a message);
+/// that is caught when the run itself comes back with the stub's text.
+fn find_program(name: &str) -> Option<PathBuf> {
+    let path = std::env::var_os("PATH")?;
+    let extensions: Vec<String> = if cfg!(target_os = "windows") {
+        std::env::var("PATHEXT")
+            .unwrap_or_else(|_| ".EXE;.CMD;.BAT;.COM".to_string())
+            .split(';')
+            .filter(|part| !part.is_empty())
+            .map(|part| part.to_ascii_lowercase())
+            .collect()
+    } else {
+        vec![String::new()]
+    };
+    for dir in std::env::split_paths(&path) {
+        for extension in &extensions {
+            let candidate = dir.join(format!("{name}{extension}"));
+            if candidate.is_file() {
+                return Some(candidate);
+            }
+        }
+    }
+    None
+}
+
 /// The program that runs a script, and the arguments that go before the script's path. Mirrors
-/// SKILL_SCRIPT_EXTENSIONS in the backend's run_skill_script.ts.
-fn interpreter_for(script: &str) -> Result<(&'static str, Vec<&'static str>), String> {
+/// SKILL_SCRIPT_EXTENSIONS in the backend's run_skill_script.ts. The first candidate that is
+/// actually installed wins, so a machine with `py` but no `python` still runs `.py` scripts.
+fn interpreter_for(script: &str) -> Result<Interpreter, String> {
     let extension = Path::new(script).extension().and_then(|e| e.to_str()).unwrap_or_default().to_ascii_lowercase();
     let windows = cfg!(target_os = "windows");
-    Ok(match extension.as_str() {
-        "py" => (if windows { "python" } else { "python3" }, vec![]),
-        "js" | "mjs" | "cjs" => ("node", vec![]),
-        "ts" => ("bun", vec![]),
-        "sh" => ("bash", vec![]),
-        "ps1" => (if windows { "powershell" } else { "pwsh" }, vec!["-NoProfile", "-ExecutionPolicy", "Bypass", "-File"]),
+    let powershell: Vec<&str> = if windows {
+        vec!["-NoProfile", "-ExecutionPolicy", "Bypass", "-File"]
+    } else {
+        vec!["-NoProfile", "-File"]
+    };
+    let (candidates, install): (Vec<(&str, Vec<&str>)>, &str) = match extension.as_str() {
+        "py" if windows => (vec![("python", vec![]), ("python3", vec![]), ("py", vec!["-3"])], "Python 3 from python.org, with \"Add python.exe to PATH\" ticked"),
+        "py" => (vec![("python3", vec![]), ("python", vec![])], "Python 3"),
+        "js" | "mjs" | "cjs" => (vec![("node", vec![]), ("bun", vec![])], "Node.js from nodejs.org"),
+        "ts" => (vec![("bun", vec![])], "Bun from bun.sh"),
+        "sh" => (vec![("bash", vec![])], "Git Bash or WSL"),
+        "ps1" if windows => (vec![("powershell", powershell)], "PowerShell"),
+        "ps1" => (vec![("pwsh", powershell)], "PowerShell 7 (pwsh)"),
         _ => return Err(format!("Aloe Desktop doesn't know how to run {script}.")),
-    })
+    };
+    for (name, args) in &candidates {
+        if find_program(name).is_some() {
+            return Ok(Interpreter {
+                program: (*name).to_string(),
+                leading_args: args.iter().map(|arg| (*arg).to_string()).collect(),
+            });
+        }
+    }
+    Err(format!(
+        "None of {} is installed or on PATH, so {script} can't run. Tell the user what to install: {install}.",
+        candidates
+            .iter()
+            .map(|(name, _)| *name)
+            .collect::<Vec<_>>()
+            .join(", ")
+    ))
+}
+
+/// Whether a skill script could run at all here. Checked before the user is asked to approve it, so
+/// a missing interpreter is reported straight away instead of after an approval that cannot work.
+pub fn preflight(input: &Value) -> Result<(), String> {
+    let script = text(input, "script");
+    if script.trim().is_empty() {
+        // A malformed job: leave the clearer "it is not one of the skill's files" error to the run.
+        return Ok(());
+    }
+    interpreter_for(&script).map(|_| ())
 }
 
 pub async fn run_skill_script(client: &reqwest::Client, config: &AgentConfig, job_id: &str, input: &Value) -> Result<Value, String> {
@@ -328,14 +395,19 @@ async fn run_local_skill_script(config: &AgentConfig, input: &Value) -> Result<V
 }
 
 async fn run_script(skill_name: &str, script: &str, script_path: &Path, skill_dir: &Path, args: &[String], cwd: &Path) -> Result<Value, String> {
-    let (program, leading_args) = interpreter_for(script)?;
-    let mut process = Command::new(program);
+    let interpreter = interpreter_for(script)?;
+    let mut process = Command::new(&interpreter.program);
     process
-        .args(&leading_args)
+        .args(&interpreter.leading_args)
         .arg(script_path)
         .args(args)
         .current_dir(cwd)
         .env("ALOE_SKILL_DIR", skill_dir)
+        // Python on Windows defaults to the machine's ANSI code page: one curly quote in a print
+        // statement is then a UnicodeEncodeError halfway through a run that had otherwise worked.
+        .env("PYTHONUTF8", "1")
+        .env("PYTHONIOENCODING", "utf-8")
+        .env("PYTHONUNBUFFERED", "1")
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -347,11 +419,21 @@ async fn run_script(skill_name: &str, script: &str, script_path: &Path, skill_di
         .map_err(|_| format!("{script} timed out after {COMMAND_TIMEOUT_SECONDS} seconds."))?
         .map_err(|e| {
             if e.kind() == std::io::ErrorKind::NotFound {
-                format!("{program} is not installed or not on PATH, so {script} can't run. Tell the user what to install.")
+                format!("{} is not installed or not on PATH, so {script} can't run. Tell the user what to install.", interpreter.program)
             } else {
                 e.to_string()
             }
         })?;
+
+    let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+    let stderr = if stderr.contains("Python was not found") || stderr.contains("App execution aliases") {
+        format!(
+            "{stderr}\n\nThat is the Windows Store stub for python, not a real Python install. Install \
+             Python 3 from python.org with \"Add python.exe to PATH\" ticked, then run this again."
+        )
+    } else {
+        stderr
+    };
 
     Ok(json!({
         "skill": skill_name,
@@ -359,7 +441,7 @@ async fn run_script(skill_name: &str, script: &str, script_path: &Path, skill_di
         "cwd": cwd.to_string_lossy(),
         "exitCode": output.status.code(),
         "stdout": truncate_text(String::from_utf8_lossy(&output.stdout).to_string()),
-        "stderr": truncate_text(String::from_utf8_lossy(&output.stderr).to_string()),
+        "stderr": truncate_text(stderr),
     }))
 }
 
@@ -380,6 +462,12 @@ mod tests {
         assert_eq!(forward, backward);
         let expected = sha256_hex(format!("a.py\0{}\nb.py\0{}\n", "1".repeat(64), "2".repeat(64)).as_bytes());
         assert_eq!(forward, expected);
+    }
+
+    #[test]
+    fn only_scripts_with_a_known_interpreter_are_accepted() {
+        assert!(interpreter_for("deck.xlsx").is_err());
+        assert!(interpreter_for("scripts/build_deck").is_err());
     }
 
     #[test]
