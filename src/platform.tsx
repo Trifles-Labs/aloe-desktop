@@ -12,7 +12,6 @@ import { configureApiClient } from "@aloe/ui/lib/api";
 import { isLocalChatId } from "@aloe/ui/lib/local_code_chats";
 import type { Platform } from "@aloe/ui/lib/platform";
 import type { User } from "@aloe/ui/lib/types";
-import ConversationFolders from "./components/ConversationFolders";
 import DesktopConnectModal from "./components/DesktopConnectModal";
 import { localCodeStore } from "./code/chatStore";
 import { isCodeSession } from "./code/sessions";
@@ -55,7 +54,6 @@ export function useDesktopPlatform(config: AgentConfig, onSignOut: () => void) {
     () => ({
       hostHasBrand: true,
       settingsSections: [{ id: "desktop", label: "Desktop app", icon: Monitor, render: () => <DesktopAppPane /> }],
-      ComposerAddon: ConversationFolders,
       readStoredUser,
       onSignOut: signOut,
       interceptOAuthConnect,

@@ -97,7 +97,7 @@ export default function DesktopAppPane() {
       </ControlGroup>
 
       <ConnectionPanel config={config} onReset={onReset} />
-      <FoldersPanel folders={config.folders} conversationFolders={config.conversationFolders} onAdd={onAddFolder} onRemove={onRemoveFolder} />
+      <FoldersPanel folders={config.folders} onAdd={onAddFolder} onRemove={onRemoveFolder} />
       <ApprovalsPanel config={config} pending={pending} onRefresh={onRefresh} onSetCommandTrustMode={onSetCommandTrustMode} />
       <DesktopControlPanel enabled={config.desktopControlEnabled} onSetEnabled={onSetDesktopControl} />
       <VoicePanel config={config} setConfig={setConfig} />

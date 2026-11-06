@@ -17,6 +17,7 @@ mod screen_fit;
 mod screen_grid;
 mod search;
 mod shell;
+mod skills;
 mod socket;
 mod terminal;
 mod updater;

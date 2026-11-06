@@ -6,13 +6,6 @@ export type GrantedFolder = {
   indexedAt: string | null;
 };
 
-/** A folder the user shared with one chat rather than granting to this device. */
-export type ConversationFolder = {
-  conversationId: string;
-  path: string;
-  label: string | null;
-};
-
 export type RecentAction = {
   jobId: string;
   kind: string;
@@ -44,7 +37,6 @@ export type AgentConfig = {
   runOnStartup: boolean;
   startMinimized: boolean;
   folders: GrantedFolder[];
-  conversationFolders: ConversationFolder[];
   recentActions: RecentAction[];
   terminalSessions: Array<{ sessionId: string; command: string; cwd: string; startedAt: string; status: string; exitCode: number | null }>;
 };
@@ -111,7 +103,6 @@ export const DEFAULT_CONFIG: AgentConfig = {
   runOnStartup: false,
   startMinimized: false,
   folders: [],
-  conversationFolders: [],
   recentActions: [],
   terminalSessions: [],
 };

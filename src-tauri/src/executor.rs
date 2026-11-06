@@ -8,7 +8,7 @@ use tokio_tungstenite::tungstenite::Message;
 use crate::browser::dispatch_browser;
 use crate::code_tools::{glob_files, grep_files, write_text_file};
 use crate::computer::{capture_desktop_screenshot, dispatch_desktop_control};
-use crate::config::{add_recent, debug_log, rescan_folder_contexts, save_config, scoped_config, AppState, COMMAND_TIMEOUT_SECONDS, MAX_REMEMBERED_JOBS};
+use crate::config::{add_recent, debug_log, rescan_folder_contexts, save_config, AppState, COMMAND_TIMEOUT_SECONDS, MAX_REMEMBERED_JOBS};
 use crate::fs::{
     apply_patch, assert_granted, attach_file, create_file, create_folder, delete_file,
     delete_folder, input_string, list_files, read_file, truncate_text, update_file, update_folder,
@@ -154,7 +154,7 @@ pub async fn post_result(
 
 /// Job kinds that run something on the user's machine, and so go through the command-trust gate.
 fn requires_command_approval(kind: &str) -> bool {
-    matches!(kind, "run_command" | "run_local_command" | "start_terminal_session" | "write_terminal_session")
+    matches!(kind, "run_command" | "run_local_command" | "start_terminal_session" | "write_terminal_session" | "run_skill_script")
 }
 
 pub async fn execute_job(app: AppHandle, job: AgentJob) {
@@ -171,19 +171,22 @@ pub async fn execute_job(app: AppHandle, job: AgentJob) {
         }
         started.insert(job.id.clone());
     }
-    // Folder scope for this job: device grants, plus anything the user shared with the conversation
-    // this job came from. Resolved once here so every path check below — and every tool dispatched
-    // from it — sees the same set. Never saved; see scoped_config in config.rs.
-    let config = {
-        let stored = state.config.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-        scoped_config(&stored, job.conversation_id.as_deref())
-    };
+    // Snapshot once so every path check below — and every tool dispatched from it — sees the same
+    // folder grants.
+    let config = state.config.lock().unwrap_or_else(std::sync::PoisonError::into_inner).clone();
 
     // Commands require explicit approval, unless "all" (run anything) or "auto" (ask Aloe's own
     // model to judge this specific command against the conversation it came from) says otherwise.
     // Input typed into a running terminal session counts as a command too: approving `python` or a
     // shell must not let everything sent to it afterwards run unseen.
     if requires_command_approval(&job.kind) {
+        // A version of a skill bundle that hasn't run here before always asks, whatever the mode:
+        // it is code from wherever the skill came from, not a command Aloe wrote (skills.rs).
+        if job.kind == "run_skill_script" && !crate::skills::is_trusted(&config, &job.input) {
+            queue_for_approval(&state, &app, job);
+            return;
+        }
+
         if config.command_trust_mode == "all" {
             run_approved_command(&app, &state, &config, job, json!({ "mode": "all" })).await;
             return;
@@ -328,6 +331,13 @@ fn queue_for_approval(state: &tauri::State<AppState>, app: &AppHandle, job: Agen
             Some(session) => (text, session.cwd, format!("Aloe wants to type this into the running terminal session `{}`.", session.command)),
             None => (text, String::new(), "Aloe wants to type this into a running terminal session.".to_string()),
         }
+    } else if job.kind == "run_skill_script" {
+        let first_run = !crate::skills::is_trusted(&state.config.lock().unwrap_or_else(std::sync::PoisonError::into_inner), &job.input);
+        (
+            crate::skills::command_line(&job.input),
+            input_string(&job.input, "cwd").unwrap_or_default(),
+            crate::skills::approval_reason(&job.input, first_run),
+        )
     } else {
         (
             input_string(&job.input, "command").unwrap_or_default(),
@@ -341,7 +351,8 @@ fn queue_for_approval(state: &tauri::State<AppState>, app: &AppHandle, job: Agen
         conversation_id: job.conversation_id.clone(),
         command,
         cwd,
-        reason: input_string(&job.input, "reason").unwrap_or(default_reason),
+        // A skill script's reason is always this device's own: it says whether this is a first run.
+        reason: if job.kind == "run_skill_script" { default_reason } else { input_string(&job.input, "reason").unwrap_or(default_reason) },
         requested_at: Utc::now().to_rfc3339(),
         input: job.input,
     };
@@ -381,10 +392,7 @@ pub async fn resolve_pending_approval(app: &AppHandle, job_id: &str, approved: b
             .ok_or("Approval request not found.")?;
         list.remove(idx)
     };
-    let config = {
-        let stored = state.config.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-        scoped_config(&stored, pending.conversation_id.as_deref())
-    };
+    let config = state.config.lock().unwrap_or_else(std::sync::PoisonError::into_inner).clone();
 
     if !approved {
         // Reaches the model as the tool call's error (see runLocalJob in the backend), so it is
@@ -395,6 +403,12 @@ pub async fn resolve_pending_approval(app: &AppHandle, job_id: &str, approved: b
             .to_string();
         post_result(&state, &config, &pending.job_id, "denied", None, Some(error)).await;
         return Ok(());
+    }
+
+    if pending.job_kind == "run_skill_script" {
+        let mut stored = state.config.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        crate::skills::trust(&mut stored, &pending.input);
+        let _ = save_config(&stored);
     }
 
     let input_val = pending.input.clone();
@@ -457,6 +471,7 @@ async fn run_tool(
         "delete_folder"          => delete_folder(config, &job.input),
         "run_command"            => run_command(config.clone(), job.input.clone()).await,
         "run_local_command"      => run_command(config.clone(), job.input.clone()).await,
+        "run_skill_script"       => crate::skills::run_skill_script(&state.client, config, &job.id, &job.input).await,
         "start_terminal_session" => start_terminal_session(state, config.clone(), job.input.clone(), Some(app), job.conversation_id.clone()).await,
         "read_terminal_session"  => read_terminal_session(state, job.input.clone()).await,
         "write_terminal_session" => write_terminal_session(state, job.input.clone()).await,
@@ -607,7 +622,7 @@ mod tests {
 
     #[test]
     fn terminal_input_needs_the_same_approval_as_commands() {
-        for kind in ["run_command", "run_local_command", "start_terminal_session", "write_terminal_session"] {
+        for kind in ["run_command", "run_local_command", "start_terminal_session", "write_terminal_session", "run_skill_script"] {
             assert!(requires_command_approval(kind), "{kind} should need approval");
         }
         for kind in ["read_terminal_session", "list_terminal_sessions", "stop_terminal_session", "read_file"] {
