@@ -22,6 +22,7 @@ import UsagePage from "@aloe/ui/pages/UsagePage";
 import BoardPage from "@aloe/ui/pages/BoardPage";
 import ApprovalsPage from "@aloe/ui/pages/ApprovalsPage";
 import MemoryPage from "@aloe/ui/pages/MemoryPage";
+import MarketplacePage from "@aloe/ui/pages/MarketplacePage";
 import { PlatformProvider } from "@aloe/ui/lib/platform";
 import { usePathname, useRouter } from "next/navigation";
 import { navigateTo } from "./shims/next-navigation";
@@ -67,6 +68,7 @@ function DesktopRouter({ codePage }: { codePage: React.ReactNode }) {
     "/app/board": <BoardPage />,
     "/app/approvals": <ApprovalsPage />,
     "/app/memory": <MemoryPage />,
+    "/app/skills": <MarketplacePage />,
     /* First run sends people here before anything else is usable; without the
        route the wizard was skipped and you landed in an empty chat. */
     "/app/onboarding": <OnboardingPage />,

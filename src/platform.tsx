@@ -53,6 +53,7 @@ export function useDesktopPlatform(config: AgentConfig, onSignOut: () => void) {
 
   const platform = useMemo<Platform>(
     () => ({
+      kind: "desktop",
       hostHasBrand: true,
       settingsSections: [{ id: "desktop", label: "Desktop app", icon: Monitor, render: () => <DesktopAppPane /> }],
       readStoredUser,
