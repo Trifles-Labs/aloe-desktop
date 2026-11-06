@@ -16,7 +16,7 @@ use crate::{
     config::{save_config, AppState, COMMAND_TIMEOUT_SECONDS, MAX_TERMINAL_BUFFER_BYTES},
     fs::{assert_granted, input_string, truncate_text},
     models::{AgentConfig, PersistedTerminalSession},
-    shell::{build_shell_command, hide_command_window},
+    shell::{build_shell_command, hide_command_window, shell_cwd},
 };
 
 const MAX_BUFFER_BYTES: usize = MAX_TERMINAL_BUFFER_BYTES;
@@ -108,7 +108,7 @@ pub async fn start_terminal_session(
 
     let mut process = build_shell_command(&command);
     process
-        .current_dir(&cwd)
+        .current_dir(shell_cwd(&cwd))
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());

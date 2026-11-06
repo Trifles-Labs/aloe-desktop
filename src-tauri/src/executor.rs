@@ -17,7 +17,7 @@ use crate::fs::{
 use crate::models::{AgentConfig, AgentJob, PendingApproval};
 use crate::notifications;
 use crate::search::search_codebase;
-use crate::shell::{build_shell_command, hide_command_window};
+use crate::shell::{build_shell_command, hide_command_window, shell_cwd};
 use crate::socket::sync_folders_with_config;
 use crate::terminal::{
     list_terminal_sessions, read_terminal_session, start_terminal_session, stop_terminal_session, wait_terminal_session,
@@ -107,12 +107,15 @@ pub async fn run_command(config: AgentConfig, input: Value) -> Result<Value, Str
     let cwd = assert_granted(&config, &input_string(&input, "cwd")?)?;
     let command = input_string(&input, "command")?;
 
+    let cwd = shell_cwd(&cwd);
     let mut process = build_shell_command(&command);
-    process.current_dir(&cwd).stdout(Stdio::piped()).stderr(Stdio::piped());
+    process.current_dir(&cwd).stdout(Stdio::piped()).stderr(Stdio::piped()).kill_on_drop(true);
     hide_command_window(&mut process);
 
     let output = tokio::time::timeout(Duration::from_secs(COMMAND_TIMEOUT_SECONDS), process.output()).await
-    .map_err(|_| "Command timed out.".to_string())?
+    .map_err(|_| format!(
+        "Command did not finish within {COMMAND_TIMEOUT_SECONDS} seconds and was stopped. Use start_terminal_session for long-running commands."
+    ))?
     .map_err(|e| e.to_string())?;
 
     Ok(json!({

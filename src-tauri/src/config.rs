@@ -29,7 +29,9 @@ pub const MAX_TEXT_BYTES: usize = 256_000;
 pub const MAX_ATTACH_BYTES: u64 = 15_000_000;
 
 // ── Command execution ────────────────────────────────────────────────────────
-pub const COMMAND_TIMEOUT_SECONDS: u64 = 60;
+/// Kept under the backend's 60 s `LOCAL_AGENT_JOB_TIMEOUT_MS`, so the desktop's own timeout
+/// message reaches the model instead of the backend's generic "Local agent job timed out."
+pub const COMMAND_TIMEOUT_SECONDS: u64 = 50;
 /// Scrollback retained per terminal session.
 pub const MAX_TERMINAL_BUFFER_BYTES: usize = 128_000;
 
