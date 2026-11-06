@@ -21,10 +21,32 @@ use crate::{config::debug_log, cursor};
 #[derive(Default)]
 pub struct PendingUpdate(Mutex<Option<(Update, Vec<u8>)>>);
 
-/// Checks for and downloads a newer version without installing it. Returns the version, or None
-/// when already up to date.
+/// What the update prompt shows.
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateInfo {
+    version: String,
+    current_version: String,
+    /// The release notes from latest.json, when the release has any.
+    notes: Option<String>,
+}
+
+fn info(update: &Update) -> UpdateInfo {
+    UpdateInfo {
+        version: update.version.clone(),
+        current_version: update.current_version.clone(),
+        notes: update.body.clone().filter(|body| !body.trim().is_empty()),
+    }
+}
+
+/// Checks for and downloads a newer version without installing it. Returns it, or None when
+/// already up to date. Called again on a timer: one already downloaded is returned as is rather
+/// than fetched again.
 #[tauri::command]
-pub async fn download_update(app: AppHandle) -> Result<Option<String>, String> {
+pub async fn download_update(app: AppHandle) -> Result<Option<UpdateInfo>, String> {
+    if let Some((update, _)) = app.state::<PendingUpdate>().0.lock().unwrap_or_else(std::sync::PoisonError::into_inner).as_ref() {
+        return Ok(Some(info(update)));
+    }
     // The hook travels with the `Update` this check returns, so it has to be set here, not at
     // install time. The pointer is the one thing that outlives the process, so it is all the hook
     // needs to put back.
@@ -37,10 +59,10 @@ pub async fn download_update(app: AppHandle) -> Result<Option<String>, String> {
         return Ok(None);
     };
     let bytes = update.download(|_, _| {}, || {}).await.map_err(|e| e.to_string())?;
-    let version = update.version.clone();
-    debug_log("updater", "downloaded", format!("version={version}"));
+    let ready = info(&update);
+    debug_log("updater", "downloaded", format!("version={}", ready.version));
     *app.state::<PendingUpdate>().0.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some((update, bytes));
-    Ok(Some(version))
+    Ok(Some(ready))
 }
 
 /// Installs the downloaded update and restarts into it. On Windows this never returns: the

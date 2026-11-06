@@ -2,12 +2,13 @@ import React, { useCallback, useEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { MotionConfig } from "framer-motion";
+import { AnimatePresence, MotionConfig } from "framer-motion";
 import { useToasts, ToastContainer } from "./toast";
 import { useAutoUpdate } from "./hooks/useAutoUpdate";
 import { AuthScreen } from "./components/AuthScreen";
 import { DesktopTitleBar } from "./components/DesktopTitleBar";
 import { UpdateBanner } from "./components/UpdateBanner";
+import { UpdateModal } from "./components/UpdateModal";
 import { VoiceIntroLauncher } from "./components/VoiceIntro";
 import { ThemeProvider } from "next-themes";
 import Providers from "@aloe/ui/providers";
@@ -89,7 +90,15 @@ function App() {
   const [googleConnecting, setGoogleConnecting] = useState(false);
   const [authError, setAuthError] = useState<string | null>(null);
   const { toasts, toast, dismiss, pause, resume } = useToasts();
-  const { updateReady, restart } = useAutoUpdate();
+  const { update, restart, restarting, restartError } = useAutoUpdate();
+  /* The modal asks once per version per run; "Later" leaves the banner as the reminder. A
+     restart that fails from the banner brings the modal back to say why. */
+  const [laterVersion, setLaterVersion] = useState<string | null>(null);
+  useEffect(() => {
+    if (restartError) setLaterVersion(null);
+  }, [restartError]);
+  const showUpdateModal = Boolean(update && laterVersion !== update.version);
+  const dismissUpdate = useCallback(() => setLaterVersion(update?.version ?? null), [update?.version]);
 
   const authenticated = Boolean(config.agentId && config.credential && config.userToken);
 
@@ -337,7 +346,12 @@ function App() {
     return (
       <div className="flex h-screen flex-col overflow-hidden">
         <DesktopTitleBar />
-        {updateReady && <UpdateBanner onRestart={() => void restart()} />}
+        {update && !showUpdateModal && <UpdateBanner version={update.version} restarting={restarting} onRestart={() => void restart()} />}
+        <AnimatePresence>
+          {update && showUpdateModal ? (
+            <UpdateModal update={update} restarting={restarting} error={restartError} onRestart={() => void restart()} onLater={dismissUpdate} />
+          ) : null}
+        </AnimatePresence>
         <div className="relative min-h-0 flex-1 contain-[layout]">
           <PlatformProvider value={platform}>
             <DesktopControlsProvider value={desktopControls}>

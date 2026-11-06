@@ -60,6 +60,17 @@ pub struct AgentConfig {
     pub trusted_skill_bundles: HashMap<String, String>,
     pub recent_actions: Vec<RecentAction>,
     pub terminal_sessions: Vec<PersistedTerminalSession>,
+    /// Files Aloe handed the user in chat (shared_files.rs), newest first. A chat card carries only
+    /// the id; opening it looks the path up here.
+    pub shared_files: Vec<SharedFile>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SharedFile {
+    pub id: String,
+    pub path: String,
+    pub shared_at: String,
 }
 
 fn default_true() -> bool {

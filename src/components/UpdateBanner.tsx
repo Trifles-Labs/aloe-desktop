@@ -1,14 +1,14 @@
 import React, { useState } from "react";
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
-import { PartyPopper, X } from "lucide-react";
+import { Loader2, PartyPopper, X } from "lucide-react";
 
 import { EASE_OUT } from "@aloe/ui/lib/motion";
 
-/* A new build is already downloaded by the time this appears, so the honest
-   framing is "next launch, or now" — not a demand. It opens by growing into
-   place rather than appearing mid-page, because it pushes the app down. */
+/* The quiet reminder left behind after "Later" on the update modal. It opens by growing into
+   place rather than appearing mid-page, because it pushes the app down. Nothing installs on its
+   own: the update waits for a restart from here or the modal. */
 
-export function UpdateBanner({ onRestart }: { onRestart: () => void }) {
+export function UpdateBanner({ version, restarting, onRestart }: { version: string; restarting: boolean; onRestart: () => void }) {
   const [dismissed, setDismissed] = useState(false);
   const reduceMotion = useReducedMotion();
 
@@ -26,10 +26,11 @@ export function UpdateBanner({ onRestart }: { onRestart: () => void }) {
           <div className="flex items-center gap-3 px-4 py-2 text-[13px] text-ink">
             <PartyPopper className="h-4 w-4 shrink-0 text-moss" />
             <span className="min-w-0 flex-1">
-              A new version of Aloe is ready. It installs the next time you launch — or restart now.
+              Aloe {version} is ready. Restart to update.
             </span>
-            <button type="button" onClick={onRestart} className="press-tap rounded-lg bg-pine px-3 py-1.5 text-xs font-semibold text-cream hover:bg-pine-hover">
-              Restart now
+            <button type="button" onClick={onRestart} disabled={restarting} className="press-tap inline-flex items-center gap-1.5 rounded-lg bg-pine px-3 py-1.5 text-xs font-semibold text-cream hover:bg-pine-hover disabled:opacity-60">
+              {restarting ? <Loader2 className="h-3 w-3 animate-spin" /> : null}
+              {restarting ? "Restarting…" : "Restart now"}
             </button>
             <button
               type="button"

@@ -491,6 +491,7 @@ async fn run_tool(
         "write_binary_file"      => write_binary_file(config, &job.input),
         "read_file"              => read_file(config, &job.input),
         "attach_file"            => attach_file(config, &job.input),
+        "share_file"             => crate::shared_files::share_file(state, config, &job.input),
         "update_file"            => update_file(config, &job.input),
         "delete_file"            => delete_file(config, &job.input),
         "create_folder"          => create_folder(config, &job.input),

@@ -63,6 +63,8 @@ export function useDesktopPlatform(config: AgentConfig, onSignOut: () => void) {
       hideConversation: (id) => isCodeSession(id) || isLocalChatId(id),
       // ...and kept only on this computer; the server stores none of them.
       codeStore: localCodeStore,
+      // Files Aloe shared in chat, opened by the id this computer minted (shared_files.rs).
+      openSharedFile: (shareId, { reveal }) => invoke<void>("shared_file_open", { id: shareId, reveal }),
       // Skills in ~/.agents/skills and Claude Code's and Codex's skill folders (local_skills.rs).
       localSkills: {
         list: () => invoke<LocalSkillSummary[]>("local_skills_list"),

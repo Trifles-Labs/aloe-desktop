@@ -18,6 +18,7 @@ mod screen_fit;
 mod screen_grid;
 mod search;
 mod local_skills;
+mod shared_files;
 mod shell;
 mod skills;
 mod socket;
@@ -807,6 +808,7 @@ pub fn run() {
             local_skills::local_skills_list,
             local_skills::local_skills_refresh,
             local_skills::local_skills_open_folder,
+            shared_files::shared_file_open,
             updater::download_update,
             updater::install_update,
         ])
