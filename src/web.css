@@ -12,6 +12,23 @@
 @source "../node_modules/@aloe/ui";
 @source "./";
 
+/* An app window shouldn't rubber-band. The webview's elastic overscroll (touchpads on Windows,
+   everything on macOS) dragged the whole window past its edge whenever a scroll ran out, and an
+   inner list that hit its end passed the scroll on to the page behind it. Stop both: no bounce at
+   the window, and each scroll area keeps its own scroll. Desktop only; the web app keeps the
+   browser's normal feel. */
+html,
+body {
+  overscroll-behavior: none;
+}
+/* If a gap ever does open at an edge, it shows the app's background, not the webview's white. */
+html {
+  background: var(--background);
+}
+* {
+  overscroll-behavior: contain;
+}
+
 :root {
   --font-geist-sans: "Geist Variable";
   --font-geist-mono: "Geist Mono Variable";
