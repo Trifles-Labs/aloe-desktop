@@ -153,7 +153,10 @@ export function projectName(path: string): string {
    already knows. The coding instructions and the project folder live in the
    backend's fixed Aloe Code system prompt (it gets the path as `projectPath`);
    repeating them here put the same paragraph into history once per message.
-   Only the branch is left, since it can change mid-session. */
-export function codeSessionContext(branch: string | null): string | null {
-  return branch ? `Git branch: ${branch}` : null;
+   Only the branch is left, since it can change mid-session, plus today's date:
+   the fixed system prompt can't carry a clock without voiding the prompt cache,
+   but this block is part of the user's own message and replays byte for byte. */
+export function codeSessionContext(branch: string | null, now: Date = new Date()): string {
+  const today = now.toLocaleDateString("en-CA"); // YYYY-MM-DD in the user's local time
+  return [branch ? `Git branch: ${branch}` : null, `Today: ${today}`].filter(Boolean).join("\n");
 }
