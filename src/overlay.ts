@@ -1,4 +1,4 @@
-import "@fontsource-variable/instrument-sans";
+import "@fontsource-variable/geist";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";

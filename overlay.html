@@ -11,13 +11,13 @@
       :root {
         --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
         --ease-in-out: cubic-bezier(0.77, 0, 0.175, 1);
-        --glow: 123 189 150; /* --moss, dark theme */
-        --moss-deep: 47 107 79; /* --moss, light theme */
-        --cream: #f4f7f0;
+        --glow: 200 243 106;
+        --moss-deep: 11 13 12;
+        --cream: #ecebe4;
         color-scheme: dark;
       }
       html, body { margin: 0; height: 100%; background: transparent; overflow: hidden; }
-      body { font: 500 13px/1 "Instrument Sans Variable", system-ui, -apple-system, "Segoe UI", sans-serif; }
+      body { font: 500 13px/1 "Geist Variable", ui-sans-serif, system-ui, sans-serif; }
 
       /* Show and hide are transitions, not keyframes: a run that resumes mid-fade retargets from
          where it is instead of restarting. */
@@ -53,7 +53,7 @@
         display: flex; align-items: center; gap: 10px;
         padding: 0 6px 0 14px;
         border-radius: 999px;
-        background: rgb(15 21 18 / 0.9);
+        background: rgb(11 13 12 / 0.94);
         box-shadow: inset 0 0 0 1px rgb(var(--glow) / 0.45);
         color: var(--cream);
         transform: translateY(-6px);
@@ -71,14 +71,14 @@
       .stop {
         flex: none; height: 28px; padding: 0 12px;
         border: 0; border-radius: 999px;
-        background: rgb(244 247 240 / 0.12); color: var(--cream);
+        background: rgb(250 250 250 / 0.12); color: var(--cream);
         font: inherit; cursor: pointer;
         transition: background-color 150ms ease, transform 120ms var(--ease-out);
       }
       .stop:active { transform: scale(0.97); }
       .stop:focus-visible { outline: 2px solid rgb(var(--glow)); outline-offset: 2px; }
       @media (hover: hover) and (pointer: fine) {
-        .stop:hover { background: rgb(244 247 240 / 0.2); }
+        .stop:hover { background: rgb(250 250 250 / 0.2); }
       }
 
       /* Gentler, not absent: the fades stay, the travel and the breathing go. */

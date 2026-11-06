@@ -68,20 +68,16 @@ export function useToasts() {
 
 // ── Container ─────────────────────────────────────────────────────────────────
 
-// Fixed (not theme-token) colors on purpose, matching the web app's toast — semantic tokens
-// like `ink`/`danger` invert between light/dark mode for use as text-on-surface, which washes
-// out white-on-white when used as a solid fill instead. Toasts should look the same, and stay
-// legible, in both themes.
 const variantClass: Record<ToastVariant, string> = {
-  success: "bg-[#2f6b4f] text-white shadow-[0_12px_32px_rgba(47,107,79,0.3)]",
-  error: "bg-[#b23a20] text-white shadow-[0_12px_32px_rgba(178,58,32,0.3)]",
-  info: "bg-[#1f4a37] text-[#f4f7f0] shadow-[0_12px_32px_rgba(31,74,55,0.3)]",
+  success: "border border-edge bg-surface-strong text-ink shadow-lg",
+  error: "border border-edge bg-surface-strong text-ink shadow-lg",
+  info: "border border-edge bg-surface-strong text-ink shadow-lg",
 };
 
 function ToastIcon({ variant }: { variant: ToastVariant }) {
-  if (variant === "success") return <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" />;
-  if (variant === "error") return <XCircle className="mt-0.5 h-4 w-4 shrink-0" />;
-  return <Info className="mt-0.5 h-4 w-4 shrink-0" />;
+  if (variant === "success") return <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-ink" />;
+  if (variant === "error") return <XCircle className="mt-0.5 h-4 w-4 shrink-0 text-danger" />;
+  return <Info className="mt-0.5 h-4 w-4 shrink-0 text-ink-soft" />;
 }
 
 type ToastContainerProps = {
@@ -106,7 +102,7 @@ export function ToastContainer({ toasts, onDismiss, onPause, onResume }: ToastCo
             /* Leaves the way it came in — the same edge, the same path. */
             exit={{ opacity: 0, transform: "translateX(28px) scale(0.96)" }}
             transition={{ duration: 0.24, ease: EASE_OUT }}
-            className={`pointer-events-auto flex w-full cursor-pointer items-start gap-2.5 rounded-2xl px-4 py-3 text-sm ${variantClass[t.variant]}`}
+            className={`pointer-events-auto flex w-full cursor-pointer items-start gap-2.5 rounded-lg border px-4 py-3 text-sm ${variantClass[t.variant]}`}
             onClick={() => onDismiss(t.id)}
             onMouseEnter={() => onPause?.(t.id)}
             onMouseLeave={() => onResume?.(t.id)}
@@ -118,7 +114,7 @@ export function ToastContainer({ toasts, onDismiss, onPause, onResume }: ToastCo
             <span className="min-w-0 flex-1 leading-5">{t.message}</span>
             <button
               type="button"
-              className="rounded-full p-1 transition-colors duration-100 hover:bg-white/15"
+              className="rounded-md p-1 text-ink-soft transition-colors duration-100 hover:bg-sage-soft hover:text-ink"
               onClick={(e) => { e.stopPropagation(); onDismiss(t.id); }}
               aria-label="Dismiss"
             >

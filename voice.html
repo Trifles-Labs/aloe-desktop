@@ -15,14 +15,14 @@
         --ease-in: cubic-bezier(0.55, 0, 0.75, 0.2);
         --ease-in-out: cubic-bezier(0.77, 0, 0.175, 1);
         --spring: cubic-bezier(0.34, 1.4, 0.64, 1);
-        --moss: 123 189 150; /* --moss, dark theme */
-        --moss-deep: 47 107 79; /* --moss, light theme */
+        --moss: 200 243 106;
+        --moss-deep: 11 13 12;
         --gold-rgb: 226 196 138;
         --tint: var(--moss);
-        --cream: #f4f7f0;
-        --cream-soft: rgb(244 247 240 / 0.62);
-        --gold: #e2c48a;
-        --surface: rgb(12 17 14 / 0.92);
+        --cream: #ecebe4;
+        --cream-soft: rgb(236 235 228 / 0.62);
+        --gold: #ff7a4d;
+        --surface: rgb(11 13 12 / 0.94);
         /* Text size from the voice preferences. */
         --scale: 1;
         color-scheme: dark;
@@ -31,7 +31,7 @@
       [data-size="l"] { --scale: 1.25; }
       [data-size="xl"] { --scale: 1.55; }
       html, body { margin: 0; height: 100%; background: transparent; overflow: hidden; }
-      body { font: 400 14px/1.5 "Instrument Sans Variable", system-ui, -apple-system, "Segoe UI", sans-serif; }
+      body { font: 400 14px/1.5 "Geist Variable", ui-sans-serif, system-ui, sans-serif; }
       #root { position: fixed; inset: 0; user-select: none; -webkit-user-select: none; }
       [data-phase="asking"], [data-phase="error"] { --tint: var(--gold-rgb); }
 
@@ -288,7 +288,7 @@
         position: absolute; transform: translate(-50%, -50%);
         max-width: 280px; width: max-content;
         padding: 4px 10px; border-radius: 8px;
-        background: rgb(12 17 14 / 0.9); color: #fff;
+        background: rgb(9 9 11 / 0.92); color: #fff;
         box-shadow: inset 0 0 0 2px var(--accent), 0 4px 14px rgb(0 0 0 / 0.35);
         font-weight: 600; font-size: 15px; line-height: 1.3; text-align: center;
         overflow-wrap: anywhere;
@@ -309,7 +309,7 @@
       .clear-marks kbd { font: inherit; font-size: 11px; color: var(--cream-soft); padding: 1px 6px; border-radius: 5px; background: rgb(244 247 240 / 0.1); }
       #root[data-marks] .clear-marks { opacity: 1; pointer-events: auto; transform: translate(-50%, 0); }
       .clear-marks:active { transform: translate(-50%, 0) scale(0.96); }
-      @media (hover: hover) and (pointer: fine) { .clear-marks:hover { background: rgb(30 40 34 / 0.96); } }
+      @media (hover: hover) and (pointer: fine) { .clear-marks:hover { background: rgb(39 39 42 / 0.96); } }
       [data-contrast="high"] .note { background: #000; box-shadow: inset 0 0 0 3px var(--accent); }
       [data-contrast="high"] .clear-marks { background: #000; box-shadow: inset 0 0 0 2px #ffd400; }
 

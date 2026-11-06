@@ -3,11 +3,8 @@ import { createRoot } from "react-dom/client";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { MotionConfig } from "framer-motion";
-import { Leaf } from "lucide-react";
-
 import { useToasts, ToastContainer } from "./toast";
 import { useAutoUpdate } from "./hooks/useAutoUpdate";
-import { ButterflyDecor } from "./components/ButterflyDecor";
 import { AuthScreen } from "./components/AuthScreen";
 import { DesktopTitleBar } from "./components/DesktopTitleBar";
 import { UpdateBanner } from "./components/UpdateBanner";
@@ -360,16 +357,7 @@ function App() {
       <DesktopTitleBar />
       <ThemeProvider attribute="class" defaultTheme="system" enableSystem disableTransitionOnChange>
         <main className="relative flex min-h-0 flex-1 flex-col overflow-y-auto bg-canvas">
-          {/* One watermark, not three. It drifts slowly enough to read as light
-              moving rather than as motion competing with the form. */}
-          <div className="pointer-events-none absolute -right-6 top-6 z-0 text-moss opacity-[0.05] drift-slow">
-            <Leaf className="h-56 w-56 rotate-12" />
-          </div>
-          <div className="pointer-events-none absolute bottom-10 left-6 z-0 text-blush opacity-[0.06]">
-            <ButterflyDecor style={{ width: 72, height: 50 }} />
-          </div>
-
-          <div className="relative z-10 flex flex-1 items-center justify-center">
+          <div className="relative z-10 flex min-h-0 flex-1 flex-col">
             <AuthScreen
               onGoogleSignIn={() => void googleSignIn()}
               googleConnecting={googleConnecting}

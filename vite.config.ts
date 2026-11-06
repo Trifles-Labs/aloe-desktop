@@ -43,6 +43,11 @@ window.addEventListener("unhandledrejection", (e) => send("Unhandled rejection: 
 const error = console.error;
 console.error = (...args) => { send(args.map((a) => a?.stack ?? (typeof a === "string" ? a : JSON.stringify(a))).join(" ")); error(...args); };`,
       },
+      {
+        tag: "script",
+        attrs: { type: "module", src: "/src/browser-preview.ts" },
+        injectTo: "body-prepend" as const,
+      },
     ],
   };
 

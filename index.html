@@ -8,8 +8,8 @@
     <style>
       /* The window is painted before any CSS module loads, so the page wash is
          declared here too — otherwise every launch starts on a white rectangle. */
-      :root { background: #eef1ea; color-scheme: light; }
-      html.dark { background: #0f1512; color-scheme: dark; }
+      :root { background: #ecebe4; color: #0b0d0c; color-scheme: light; }
+      html.dark { background: #0b0d0c; color: #ecebe4; color-scheme: dark; }
       body { margin: 0; }
     </style>
     <script>
@@ -18,9 +18,16 @@
          the first frame — the provider then agrees with what is already there. */
       (function () {
         try {
+          /* Browser preview has no saved desktop theme. Open on the night
+             the homepage uses, so the first paint isn't a blank light field. */
+          if (!window.__TAURI_INTERNALS__) {
+            document.documentElement.classList.add("dark");
+            return;
+          }
           var stored = localStorage.getItem("theme");
-          var dark = stored === "dark" || ((!stored || stored === "system") && window.matchMedia("(prefers-color-scheme: dark)").matches);
+          var dark = stored === "dark" || stored === "true-dark" || ((!stored || stored === "system") && window.matchMedia("(prefers-color-scheme: dark)").matches);
           if (dark) document.documentElement.classList.add("dark");
+          if (stored === "true-dark") document.documentElement.classList.add("true-dark");
         } catch (error) {
           /* Private mode or a locked-down storage policy — light is the default. */
         }

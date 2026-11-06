@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useState, useSyncExternalStore } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { ArrowLeft, ArrowRight, Code2, Leaf, MessagesSquare, Minus, SquarePen, X } from "lucide-react";
+import { ArrowLeft, ArrowRight, Code2, MessagesSquare, Minus, SquarePen, X } from "lucide-react";
 
 import { readLastCodeRoute } from "../code/sessions";
 import { goBack, goForward, navigateTo, routePosition, subscribeToRoute } from "../shims/next-navigation";
@@ -74,17 +74,17 @@ function ModeSwitch({ code }: { code: boolean }) {
       aria-checked={active}
       title={label}
       onClick={onClick}
-      className={`press-tap inline-flex h-6 items-center gap-1.5 rounded-md px-2 text-[12px] font-medium transition-colors ${
-        active ? "bg-surface-strong text-ink shadow-[0_1px_2px_rgba(22,33,26,0.12)]" : "text-ink-soft hover:text-ink"
+      className={`press-tap inline-flex h-7 items-center gap-1.5 px-2 text-[12px] font-medium transition-colors ${
+        active ? "text-ink" : "text-ink-soft hover:text-ink"
       }`}
     >
       {icon}
-      <span>{label}</span>
+      <span className={active ? "border-b border-[#c8f36a] pb-px" : ""}>{label}</span>
     </button>
   );
 
   return (
-    <div role="radiogroup" aria-label="Mode" className="inline-flex items-center gap-0.5 rounded-lg bg-sage-soft/70 p-0.5">
+    <div role="radiogroup" aria-label="Mode" className="inline-flex items-center">
       {option(!code, "Chat", () => code && navigateTo(lastChatRoute), <MessagesSquare className="h-3.5 w-3.5" />)}
       {option(code, "Code", () => !code && navigateTo(readLastCodeRoute()), <Code2 className="h-3.5 w-3.5" />)}
     </div>
@@ -98,7 +98,7 @@ function WindowButton({ label, onClick, danger, children }: { label: string; onC
       title={label}
       aria-label={label}
       onClick={onClick}
-      className={`flex h-10 w-[46px] items-center justify-center text-ink-soft transition-colors duration-100 hover:text-ink active:brightness-95 ${
+      className={`flex h-12 w-[46px] items-center justify-center text-ink-soft transition-colors duration-100 hover:text-ink active:brightness-95 ${
         danger ? "hover:bg-danger hover:text-on-accent" : "hover:bg-sage-soft"
       }`}
     >
@@ -166,11 +166,10 @@ export function DesktopTitleBar() {
   return (
     <header
       data-tauri-drag-region
-      className="liquid-glass-bar relative z-[100] flex h-10 shrink-0 select-none items-center gap-0.5 pl-2 text-ink"
+      className="liquid-glass-bar relative z-[100] flex h-12 shrink-0 select-none items-center gap-0.5 pl-4 text-ink"
     >
-      {/* Identity, not a control — the leaf stays part of the drag region. */}
-      <span data-tauri-drag-region className="brand-mark mr-1 h-6 w-6 shrink-0">
-        <Leaf className="h-3.5 w-3.5" />
+      <span data-tauri-drag-region className="aloe-wordmark mr-3 text-[1.35rem] text-ink">
+        Aloe<span style={{ color: "#c8f36a" }}>.</span>
       </span>
 
       <HistoryButton label={code ? "New session" : "New chat"} disabled={false} onClick={openNewChat}>
@@ -201,7 +200,9 @@ export function DesktopTitleBar() {
         aria-hidden
         className={`pointer-events-none absolute inset-x-0 flex justify-center transition-opacity duration-200 ${focused ? "opacity-100" : "opacity-45"}`}
       >
-        <span className="max-w-[40%] truncate text-[12px] font-medium tracking-[0.01em] text-ink-soft">{routeTitle(pathname)}</span>
+        {routeTitle(pathname) !== "Aloe" ? (
+          <span className="max-w-[40%] truncate text-[12px] font-medium tracking-[0.01em] text-ink-soft">{routeTitle(pathname)}</span>
+        ) : null}
       </div>
 
       <div className={`flex h-full items-center transition-opacity duration-200 ${focused ? "opacity-100" : "opacity-55"}`}>

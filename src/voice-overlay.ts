@@ -1,4 +1,4 @@
-import "@fontsource-variable/instrument-sans";
+import "@fontsource-variable/geist";
 import { invoke } from "@tauri-apps/api/core";
 import "./voice-drawing";
 
