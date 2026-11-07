@@ -70,7 +70,7 @@ export function ApprovalsPanel({ config, pending, onRefresh, onSetCommandTrustMo
         {commandModes.map((option) => {
           const selected = config.commandTrustMode === option.mode;
           return (
-            <label key={option.mode} className="settings-row relative cursor-pointer items-start">
+            <label key={option.mode} className="settings-row relative cursor-pointer items-start transition-colors duration-150 hover:bg-sage-soft/40">
               {/* One marker for the group: it travels to the option you picked
                   rather than blinking on there, which is what tells you what you
                   just left. */}
@@ -79,7 +79,7 @@ export function ApprovalsPanel({ config, pending, onRefresh, onSetCommandTrustMo
                   aria-hidden
                   layoutId="trust-mode-marker"
                   transition={reduceMotion ? { duration: 0 } : SPRING_MOVE}
-                  className="absolute inset-1 rounded-[10px] bg-sage-soft"
+                  className="absolute inset-0 bg-sage-soft"
                 />
               ) : null}
 
