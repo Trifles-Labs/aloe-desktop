@@ -73,12 +73,12 @@ export function FoldersPanel({ folders, onAdd, onRemove }: Props) {
                   onClick={() => onRemove(folder.path)}
                   title={`Remove ${folder.label ?? folder.path}`}
                   aria-label={`Remove ${folder.label ?? folder.path}`}
-                  /* Quiet until wanted, and only where a real pointer exists —
-                     Tailwind's `hover:` already carries the (hover: hover) query.
-                     The transitions are spelled out rather than using `.press-tap`:
-                     a `transition-*` utility sorts after that layer and would
-                     replace its whole property list, silently dropping one. */
-                  className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-ink-soft opacity-0 transition-[opacity,background-color,color,transform] duration-150 hover:bg-clay/12 hover:text-danger focus-visible:opacity-100 active:scale-[0.97] motion-reduce:active:scale-100 group-hover:opacity-100"
+                  /* Quiet until wanted, but not only where a pointer can hover: hiding it behind
+                     `group-hover` left it unreachable on a pen or touch screen, where `:hover`
+                     never fires. The opacity is gated on the same media query Tailwind's own
+                     `hover:` uses, so a mouse still sees a clean row and every other device sees
+                     the button. */
+                  className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-ink-soft transition-[opacity,background-color,color,transform] duration-150 hover:bg-clay/12 hover:text-danger focus-visible:opacity-100 active:scale-[0.97] motion-reduce:active:scale-100 [@media(hover:hover)]:opacity-0 [@media(hover:hover)]:group-hover:opacity-100"
                 >
                   <Trash2 className="h-4 w-4" />
                 </button>
