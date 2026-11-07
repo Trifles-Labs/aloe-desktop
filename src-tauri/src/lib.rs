@@ -16,6 +16,7 @@ mod overlay;
 mod project;
 mod screen_fit;
 mod screen_grid;
+mod screen_ocr;
 mod search;
 mod local_skills;
 mod shared_files;

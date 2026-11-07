@@ -533,6 +533,7 @@ async fn run_tool(
         "capture_desktop_screenshot" => capture_desktop_screenshot(app).await,
         "capture_screen_region"  => crate::computer::capture_screen_region(app, &job.input).await,
         "fit_screen_box"         => crate::computer::fit_screen_box(app, &job.input).await,
+        "read_screen_text"       => crate::screen_ocr::read_screen_text(app, &job.input).await,
         "get_editor_context"     => get_editor_context(config, &job.input).await,
         "show_notification"      => show_notification(app, &job.input).await,
         // Marks over the screen during a voice reply (voice/drawing.rs).

@@ -10,6 +10,7 @@
 //! answer), or the Clear marks chip. Aloe can also replace them ("draw") or clear them. They
 //! outlive the answer they were drawn for and the user talking again, which may be about them.
 
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Mutex;
 
 use serde::Serialize;
@@ -31,6 +32,32 @@ pub struct Drawing {
 }
 
 static DRAWING: Mutex<Drawing> = Mutex::new(Drawing { marks: Vec::new(), fresh_from: 0 });
+/// Jobs from the backend carry this. A clear or a replace that lands first wins over an older one.
+/// An add does not raise it: several adds from one turn all paint, whichever finishes first.
+static DRAW_REVISION: AtomicU64 = AtomicU64::new(0);
+
+fn revision_of(input: &Value) -> Option<u64> {
+    let revision = input.get("revision").and_then(Value::as_u64)?;
+    if revision == 0 { None } else { Some(revision) }
+}
+
+/// True when a clear or a replace newer than this job has already landed.
+fn behind_committed(input: &Value) -> bool {
+    match revision_of(input) {
+        Some(revision) => revision < DRAW_REVISION.load(Ordering::SeqCst),
+        None => false,
+    }
+}
+
+fn revision_current(input: &Value) -> bool {
+    !behind_committed(input)
+}
+
+fn commit_revision(input: &Value) {
+    if let Some(revision) = revision_of(input) {
+        DRAW_REVISION.fetch_max(revision, Ordering::SeqCst);
+    }
+}
 
 /// What a freshly loaded page should draw, all of it already in place.
 pub fn current() -> Drawing {
@@ -45,8 +72,35 @@ pub fn is_showing() -> bool {
 /// Runs one draw_on_screen job: `{ action: "draw" | "add" | "clear", items }`.
 pub async fn apply(app: &AppHandle, input: &Value) -> Result<Value, String> {
     let action = input.get("action").and_then(Value::as_str).unwrap_or("draw");
+    // Adds from the same turn all stay. Only a clear or a replace that already committed
+    // drops an add that was issued before it.
+    if action == "add" {
+        if behind_committed(input) {
+            debug_log("voice", "drawing_stale", format!("action={action}"));
+            return Ok(json!({ "stale": true }));
+        }
+    } else if !revision_current(input) {
+        debug_log("voice", "drawing_stale", format!("action={action}"));
+        return Ok(json!({ "stale": true }));
+    }
     if action == "clear" {
-        clear(app);
+        let push_clear = {
+            let mut drawing = DRAWING.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+            if !revision_current(input) {
+                debug_log("voice", "drawing_stale", format!("action={action}"));
+                return Ok(json!({ "stale": true }));
+            }
+            commit_revision(input);
+            if drawing.marks.is_empty() {
+                false
+            } else {
+                *drawing = Drawing::default();
+                true
+            }
+        };
+        if push_clear {
+            push(app, &Drawing::default());
+        }
         return Ok(json!({ "cleared": true }));
     }
     let items = input.get("items").and_then(Value::as_array).cloned().unwrap_or_default();
@@ -62,7 +116,17 @@ pub async fn apply(app: &AppHandle, input: &Value) -> Result<Value, String> {
 
     let drawing = {
         let mut drawing = DRAWING.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-        if action != "add" {
+        // A newer clear or replace may have landed while the overlay was moving onto the primary display.
+        if action == "add" {
+            if behind_committed(input) {
+                debug_log("voice", "drawing_stale", format!("action={action}"));
+                return Ok(json!({ "stale": true }));
+            }
+        } else if !revision_current(input) {
+            debug_log("voice", "drawing_stale", format!("action={action}"));
+            return Ok(json!({ "stale": true }));
+        } else {
+            commit_revision(input);
             drawing.marks.clear();
         }
         drawing.fresh_from = drawing.marks.len();
