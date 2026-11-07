@@ -177,6 +177,22 @@
       /* Once Aloe answers, what you said steps back to a one-line caption. */
       #root[data-replied] .said { font-size: calc(11px * var(--scale)); color: var(--cream-soft); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
       .reply { color: var(--cream); }
+      /* The answer's Markdown and maths (voice-writing.ts builds it). */
+      .reply .line { min-height: 1.4em; }
+      .reply .gap { height: 0.5em; }
+      .reply .h1, .reply .h2, .reply .h3 { font-weight: 650; margin-top: 0.15em; }
+      .reply .h1 { font-size: 1.16em; }
+      .reply .h2 { font-size: 1.08em; }
+      .reply .item { position: relative; padding-left: 1.1em; }
+      .reply .bullet { position: absolute; left: 0.15em; }
+      .reply strong { font-weight: 650; }
+      .reply code, .reply pre.code { font-family: "Geist Mono Variable", ui-monospace, monospace; font-size: 0.9em; background: rgb(244 247 240 / 0.1); border-radius: 0.3em; }
+      .reply code { padding: 0.05em 0.3em; }
+      .reply pre.code { margin: 0.3em 0; padding: 0.45em 0.6em; white-space: pre; overflow-x: auto; }
+      .reply .tex.display { display: block; margin: 0.3em 0; overflow-x: auto; overflow-y: hidden; }
+      .reply .katex { font-size: 1.06em; color: inherit; }
+      .reply .katex-display { margin: 0; text-align: left; }
+      .reply .katex-display > .katex { text-align: left; }
       .status { font-size: calc(12px * var(--scale)); color: var(--cream-soft); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
       .error { font-size: calc(13px * var(--scale)); color: var(--gold); }
 
@@ -368,7 +384,7 @@
               <ol class="ask-options" id="ask-options"></ol>
               <p class="ask-hint" id="ask-hint"></p>
             </div>
-            <p class="reply" id="reply"></p>
+            <div class="reply" id="reply"></div>
             <p class="status" id="status"></p>
             <p class="error" id="error"></p>
           </div>

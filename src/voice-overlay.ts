@@ -1,6 +1,7 @@
 import "@fontsource-variable/geist";
 import { invoke } from "@tauri-apps/api/core";
 import "./voice-drawing";
+import { markdownBlocks } from "./voice-writing";
 
 /* The push-to-talk overlay (voice.html). No React, like overlay.ts: voice/overlay.rs owns the
    state and pushes it in whole with window.eval; this renders it, and runs one animation loop
@@ -57,15 +58,15 @@ const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
 /* Where the island sits from the top of the screen, as in voice.html. */
 const ISLAND_TOP = 12;
 
-/* The reply is markdown; the island is a glance, not a reader, so it shows the words without the
-   syntax. textContent only — nothing from the model is ever parsed as HTML. */
+/* The reply without its Markdown syntax, for the screen reader and to tell whether there is one.
+   The island itself shows it formatted (showReply). */
 const plain = (markdown: string) =>
   markdown
     .replace(/```[^\n]*\n[\s\S]*?(```|$)/g, "[code]\n")
     .replace(/^\s{0,3}#{1,6}\s+/gm, "")
     .replace(/^\s{0,3}[-*+]\s+/gm, "• ")
     .replace(/!?\[([^\]]*)\]\([^)]*\)/g, "$1")
-    .replace(/(\*\*|__|~~|`)/g, "")
+    .replace(/(\*\*|__|~~|`|\$\$|\$|\\\(|\\\)|\\\[|\\\])/g, "")
     .replace(/\n{3,}/g, "\n\n")
     .trim();
 
@@ -111,6 +112,46 @@ const flow = (element: HTMLElement, next: string): "same" | "grew" | "rewrote" =
   } else {
     element.append(...words(next.slice(before.length), true));
   }
+  return "grew";
+};
+
+/* The reply as Markdown with its maths set (voice-writing.ts: DOM nodes and textContent, KaTeX
+   with trust off). As it streams in, only the blocks that changed are rebuilt — usually just the
+   last line — so words already up keep their place and read-along state, and new ones fade in. */
+let replySource = "";
+let replySources: string[] = [];
+const showReply = (markdown: string): "same" | "grew" | "rewrote" => {
+  if (markdown === replySource) return "same";
+  const before = replySource;
+  replySource = markdown;
+  const blocks = markdownBlocks(markdown);
+  const sources = blocks.map((block) => block.source);
+  if (!before || !markdown.startsWith(before)) {
+    reply.replaceChildren(...blocks.map((block) => block.element));
+    replySources = sources;
+    if (before && markdown) {
+      reply.classList.remove("rewrite");
+      void reply.offsetWidth; // Restart the fade.
+      reply.classList.add("rewrite");
+    }
+    return "rewrote";
+  }
+  let keep = 0;
+  while (keep < replySources.length && keep < sources.length && replySources[keep] === sources[keep]) keep++;
+  const kept = Array.from(reply.children).slice(0, keep);
+  const keptWords = kept.reduce((n, block) => n + block.getElementsByClassName("wd").length, 0);
+  const shownWords = replyWords.length;
+  for (const block of Array.from(reply.children).slice(keep)) block.remove();
+  reply.append(...blocks.slice(keep).map((block) => block.element));
+  replySources = sources;
+  // Rebuilt words that were already on screen stay as they were; only new ones fade in.
+  for (let i = Math.max(keptWords, shownWords), fresh = 0; i < replyWords.length; i++, fresh++) {
+    replyWords[i]!.classList.add("w");
+    replyWords[i]!.style.animationDelay = `${Math.min(fresh, 8) * 18}ms`;
+  }
+  norms.length = Math.min(norms.length, keptWords);
+  for (let i = keptWords; i < replyWords.length; i++) replyWords[i]!.toggleAttribute("data-said", i < saidThrough);
+  if (lit >= keptWords) replyWords[lit]?.setAttribute("data-now", "");
   return "grew";
 };
 
@@ -254,7 +295,7 @@ const render = (view: View) => {
   const working = view.control && (view.phase === "thinking" || view.phase === "transcribing");
   setLabel(working ? CONTROL_LABEL : LABELS[view.phase], working);
   flow(said, view.transcript);
-  if (flow(reply, replyText) === "rewrote") {
+  if (showReply(replyText ? view.reply.trim() : "") === "rewrote") {
     // A new reply (or none): start reading along from its top.
     norms.length = 0;
     lit = -1;
