@@ -26,7 +26,7 @@ TAURI_CONF   = SCRIPT_DIR / "src-tauri" / "tauri.conf.json"
 KEY_PATH     = SCRIPT_DIR / ".tauri" / "aloe.key"
 BUNDLE_DIR   = SCRIPT_DIR / "src-tauri" / "target" / "release" / "bundle"
 FRONTEND_DIR = SCRIPT_DIR.parent / "aloe-frontend" / "public" / "desktop"
-FRONTEND_URL = "https://aloe.247autoarmy.in"
+FRONTEND_URL = "https://askaloe.in"
 
 SUPPORTED_PLATFORMS = ("windows", "linux")
 LINUX_BUNDLES = ("deb", "rpm", "appimage", "binary")
