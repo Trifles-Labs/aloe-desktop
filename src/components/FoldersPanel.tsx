@@ -14,6 +14,16 @@ type Props = {
   onRemove: (path: string) => void;
 };
 
+/** Grants are stored canonicalized, which on Windows means `\\?\C:\...` (and
+    `\\?\UNC\server\share` for a share). Those prefixes are how the OS spells a
+    path to itself, not how a person writes one: the row shows the plain form.
+    Only the display is rewritten — the grant, its tooltip and `onRemove` keep
+    the exact stored path, since that is what the backend and Rust compare. */
+function displayPath(path: string): string {
+  if (path.startsWith("\\\\?\\UNC\\")) return `\\\\${path.slice(8)}`;
+  return path.startsWith("\\\\?\\") ? path.slice(4) : path;
+}
+
 export function FoldersPanel({ folders, onAdd, onRemove }: Props) {
   const reduceMotion = useReducedMotion();
 
@@ -51,8 +61,8 @@ export function FoldersPanel({ folders, onAdd, onRemove }: Props) {
                 <Folder className="mt-0.5 h-4 w-4 shrink-0 text-moss" />
                 <div className="min-w-0">
                   <p className="truncate text-[13px] font-medium leading-5 text-ink">{folder.label ?? "Folder"}</p>
-                  <p className="truncate font-mono text-[11px] leading-5 text-ink-soft" title={folder.path}>
-                    {folder.path}
+                  <p className="truncate font-mono text-[11px] leading-5 text-ink-soft" title={displayPath(folder.path)}>
+                    {displayPath(folder.path)}
                   </p>
                 </div>
               </div>
