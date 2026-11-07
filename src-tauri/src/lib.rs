@@ -17,6 +17,7 @@ mod project;
 mod screen_fit;
 mod screen_grid;
 mod screen_ocr;
+mod scratchpad;
 mod search;
 mod local_skills;
 mod shared_files;
@@ -816,6 +817,7 @@ pub fn run() {
         .setup(|app| {
             // A green pointer a crashed desktop-control run never put back.
             cursor::restore_left_over();
+            scratchpad::cleanup_in_background();
             desktop::install_tray(app)?;
 
             // Dev builds and portable bundles are not registered by an installer, so claim the

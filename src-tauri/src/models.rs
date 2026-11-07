@@ -63,6 +63,10 @@ pub struct AgentConfig {
     /// Files Aloe handed the user in chat (shared_files.rs), newest first. A chat card carries only
     /// the id; opening it looks the path up here.
     pub shared_files: Vec<SharedFile>,
+    /// The scratch folder of the conversation the current job belongs to (scratchpad.rs). Set only
+    /// on the per-job copy `executor::dispatch_tool` checks paths against, never saved.
+    #[serde(skip)]
+    pub scratchpad_session: Option<std::path::PathBuf>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -478,6 +478,16 @@ pub async fn dispatch_tool(
     config: &AgentConfig,
     job: &AgentJob,
 ) -> Result<Value, String> {
+    // This job may also use its own conversation's scratch folder, and no other's (scratchpad.rs).
+    let mut scoped;
+    let config = match crate::scratchpad::session_for_job(job.conversation_id.as_deref(), &job.input) {
+        Some(session) => {
+            scoped = config.clone();
+            scoped.scratchpad_session = Some(session);
+            &scoped
+        }
+        None => config,
+    };
     // The file as it was before this write, for Aloe Code's Changes pane (changes.rs).
     let tracked = crate::changes::before_job(config, job.conversation_id.as_deref(), &job.kind, &job.input);
     let result = run_tool(app, state, config, job).await;

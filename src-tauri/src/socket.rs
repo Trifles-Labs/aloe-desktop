@@ -52,7 +52,7 @@ pub async fn sync_folders_with_config(client: &Client, config: &AgentConfig) -> 
     let response = client
         .put(format!("{}/api/agent/folders", config.api_url))
         .bearer_auth(credential)
-        .json(&json!({ "folders": config.folders }))
+        .json(&json!({ "folders": config.folders, "scratchpadRoot": crate::scratchpad::display_root() }))
         .send()
         .await
         .map_err(|e| e.to_string())?;

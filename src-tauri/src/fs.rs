@@ -34,6 +34,13 @@ pub fn assert_granted(config: &AgentConfig, raw_path: &str) -> Result<PathBuf, S
             return Ok(target);
         }
     }
+    // This job's own conversation scratch folder (scratchpad.rs). Already canonical: it is the
+    // canonical scratchpad root joined with a sanitized name.
+    if let Some(session) = &config.scratchpad_session {
+        if target == *session || target.starts_with(session) {
+            return Ok(target);
+        }
+    }
     Err(format!("Path is outside Aloe granted folders: {raw_path}"))
 }
 
@@ -577,6 +584,26 @@ mod tests {
         })).unwrap_err();
 
         assert!(err.contains("identical"), "unexpected error: {err}");
+    }
+
+    #[test]
+    fn only_the_jobs_own_scratch_folder_is_granted() {
+        let granted = temp_project("scratch_grant");
+        let root = temp_project("scratch_root");
+        let mine = root.join("conv1");
+        let theirs = root.join("conv2");
+        fs::create_dir_all(&mine).unwrap();
+        fs::create_dir_all(&theirs).unwrap();
+        let mut config = config_granting(&granted);
+
+        // No session on the config: the scratchpad is like any other ungranted folder.
+        assert!(assert_granted(&config, &mine.join("a.py").to_string_lossy()).is_err());
+
+        config.scratchpad_session = Some(mine.clone());
+        assert!(assert_granted(&config, &mine.join("a.py").to_string_lossy()).is_ok());
+        assert!(assert_granted(&config, &theirs.join("a.py").to_string_lossy()).is_err());
+        assert!(assert_granted(&config, &mine.join("..").join("conv2").join("a.py").to_string_lossy()).is_err());
+        assert!(assert_granted(&config, &granted.join("b.txt").to_string_lossy()).is_ok());
     }
 
     #[test]
