@@ -24,7 +24,7 @@ use enigo::{Axis, Button, Coordinate, Direction, Enigo, Key, Keyboard, Mouse, Se
 use image::{
     codecs::jpeg::JpegEncoder,
     imageops::{self, FilterType},
-    DynamicImage,
+    DynamicImage, RgbaImage,
 };
 use serde_json::{json, Value};
 use std::{
@@ -165,19 +165,28 @@ async fn on_input_thread<T: Send + 'static>(app: &AppHandle, f: impl FnOnce() ->
 // ── Screenshots ──────────────────────────────────────────────────────────────
 
 fn capture(geometry: Option<ScreenGeometry>) -> Result<Value, String> {
+    let (captured, size) = grab_primary()?;
+    encode_shot(captured, geometry, size)
+}
+
+/// The primary display as captured, at its own resolution, and its size as the monitor reports it.
+fn grab_primary() -> Result<(RgbaImage, (i32, i32)), String> {
     let monitors = Monitor::all().map_err(|e| format!("Could not list displays: {e}"))?;
     let monitor = monitors
         .iter()
         .find(|m| m.is_primary())
         .or_else(|| monitors.first())
         .ok_or_else(|| "No display found.".to_string())?;
-    // Input access can be missing (Wayland, no Accessibility grant) while capture still works, so a
-    // plain screenshot falls back to the monitor's own size rather than failing outright.
-    let geometry = geometry.unwrap_or_else(|| ScreenGeometry::from_display(monitor.width() as i32, monitor.height() as i32));
-
     let captured = monitor
         .capture_image()
         .map_err(|e| format!("Screen capture failed: {e}.{}", permission_hint()))?;
+    Ok((captured, (monitor.width() as i32, monitor.height() as i32)))
+}
+
+fn encode_shot(captured: RgbaImage, geometry: Option<ScreenGeometry>, monitor: (i32, i32)) -> Result<Value, String> {
+    // Input access can be missing (Wayland, no Accessibility grant) while capture still works, so a
+    // plain screenshot falls back to the monitor's own size rather than failing outright.
+    let geometry = geometry.unwrap_or_else(|| ScreenGeometry::from_display(monitor.0, monitor.1));
     let rgb = DynamicImage::ImageRgba8(captured).to_rgb8();
     let rgb = if rgb.dimensions() == (geometry.shot_w, geometry.shot_h) {
         rgb
@@ -299,6 +308,51 @@ pub async fn fit_screen_box(app: &AppHandle, input: &Value) -> Result<Value, Str
     })
     .await
     .map_err(|e| e.to_string())?
+}
+
+/// The picture that goes with a spoken message. While Aloe's marks are up it keeps them in, so Aloe
+/// sees what it already drew and puts new marks around it rather than on top: the screen is taken
+/// once with the overlay left out and once with it in, and the island and clear chip are copied
+/// back from the clean one, so only the marks remain. Captures that place marks (OCR, grounding,
+/// fit_screen_box) still leave the overlay out. Without marks, it is the plain desktop screenshot.
+pub async fn capture_voice_screenshot(app: &AppHandle) -> Result<Value, String> {
+    if !crate::voice::drawing::is_showing() {
+        return capture_desktop_screenshot(app).await;
+    }
+    let clean = {
+        let _hidden = crate::voice::overlay::own_capture(app).await;
+        tauri::async_runtime::spawn_blocking(grab_primary).await.map_err(|e| e.to_string())??
+    };
+    let geometry = on_input_thread(app, || new_enigo().and_then(|enigo| display_geometry(&enigo)).ok()).await?;
+    // Let the overlay back into captures before taking the one that shows the marks.
+    tokio::time::sleep(crate::voice::overlay::CAPTURE_SETTLE).await;
+    if crate::voice::overlay::captures_running() {
+        // Another of Aloe's captures has it hidden again: the clean picture is all there is.
+        return encode_shot(clean.0, geometry, clean.1);
+    }
+    let marked = tauri::async_runtime::spawn_blocking(grab_primary).await.map_err(|e| e.to_string())?;
+    let Ok((mut marked, size)) = marked else {
+        return encode_shot(clean.0, geometry, clean.1);
+    };
+    if marked.dimensions() != clean.0.dimensions() {
+        return encode_shot(clean.0, geometry, clean.1);
+    }
+    for (x, y, w, h) in crate::voice::overlay::chrome_in_pixels() {
+        copy_region(&clean.0, &mut marked, x, y, w, h);
+    }
+    encode_shot(marked, geometry, size)
+}
+
+/// Copies one rectangle of `from` onto `to` (same size), clipped to the image.
+fn copy_region(from: &RgbaImage, to: &mut RgbaImage, x: i64, y: i64, w: i64, h: i64) {
+    let (width, height) = (i64::from(from.width()), i64::from(from.height()));
+    let (x0, y0) = (x.clamp(0, width), y.clamp(0, height));
+    let (x1, y1) = ((x + w).clamp(0, width), (y + h).clamp(0, height));
+    for py in y0..y1 {
+        for px in x0..x1 {
+            to.put_pixel(px as u32, py as u32, *from.get_pixel(px as u32, py as u32));
+        }
+    }
 }
 
 pub async fn capture_desktop_screenshot(app: &AppHandle) -> Result<Value, String> {
@@ -867,6 +921,21 @@ fn trip_failsafe(app: &AppHandle) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn copy_region_patches_the_island_back_and_clips_at_the_edges() {
+        let clean = RgbaImage::from_pixel(10, 10, image::Rgba([1, 1, 1, 255]));
+        let mut marked = RgbaImage::from_pixel(10, 10, image::Rgba([9, 9, 9, 255]));
+        // Runs off the top-left corner: only the part on the image is copied.
+        copy_region(&clean, &mut marked, -3, -3, 6, 5);
+        assert_eq!(marked.get_pixel(0, 0)[0], 1);
+        assert_eq!(marked.get_pixel(2, 1)[0], 1);
+        assert_eq!(marked.get_pixel(3, 1)[0], 9);
+        assert_eq!(marked.get_pixel(0, 2)[0], 9);
+        // Entirely off the image: nothing changes.
+        copy_region(&clean, &mut marked, 20, 20, 5, 5);
+        assert_eq!(marked.get_pixel(9, 9)[0], 9);
+    }
 
     #[test]
     fn geometry_scales_a_large_display_screenshot_down() {

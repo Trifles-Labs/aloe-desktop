@@ -124,6 +124,25 @@ pub fn set_island(rect: Option<Rect>) {
     *ISLAND.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = rect;
 }
 
+/// Room left around the island and chip for their glow and shadow, in page pixels.
+const CHROME_PAD: f64 = 28.0;
+
+/// Where the island and the clear chip are, in physical pixels from the stage's top-left (the
+/// primary display's, while marks are up): what a screenshot that keeps the marks must still
+/// leave out. As `(x, y, width, height)`, padded for the glow.
+pub fn chrome_in_pixels() -> Vec<(i64, i64, i64, i64)> {
+    let scale = STAGE.lock().unwrap_or_else(std::sync::PoisonError::into_inner).map_or(1.0, |stage| stage.scale);
+    let rects = [*ISLAND.lock().unwrap_or_else(std::sync::PoisonError::into_inner), *CHIP.lock().unwrap_or_else(std::sync::PoisonError::into_inner)];
+    rects
+        .into_iter()
+        .flatten()
+        .map(|rect| {
+            let px = |n: f64| (n * scale).round() as i64;
+            (px(rect.x - CHROME_PAD), px(rect.y - CHROME_PAD), px(rect.width + 2.0 * CHROME_PAD), px(rect.height + 2.0 * CHROME_PAD))
+        })
+        .collect()
+}
+
 /// The page's clear chip moved, appeared or went (`None`).
 pub fn set_chip(rect: Option<Rect>) {
     *CHIP.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = rect;
@@ -342,9 +361,10 @@ fn overlay_window(app: &AppHandle, x: f64, y: f64, width: f64, height: f64) -> R
 /// Aloe's own screen captures running, and when the overlay was last taken out of captures.
 static OWN_CAPTURES: Mutex<(usize, Option<Instant>)> = Mutex::new((0, None));
 /// How long the system may take to stop drawing a window into captures once told to.
-const CAPTURE_SETTLE: Duration = Duration::from_millis(80);
+pub(crate) const CAPTURE_SETTLE: Duration = Duration::from_millis(80);
 
-fn captures_running() -> bool {
+/// Whether one of Aloe's own captures has the overlay out of captures right now.
+pub(crate) fn captures_running() -> bool {
     OWN_CAPTURES.lock().unwrap_or_else(std::sync::PoisonError::into_inner).0 > 0
 }
 

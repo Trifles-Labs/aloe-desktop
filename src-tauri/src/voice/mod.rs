@@ -51,7 +51,7 @@ use tokio::sync::{
     oneshot,
 };
 
-use crate::computer::capture_desktop_screenshot;
+use crate::computer::capture_voice_screenshot;
 use crate::config::{debug_log, save_config, AppState, VOICE_MAX_SECONDS};
 use crate::models::PendingApproval;
 use audio::{Capture, Earcon, Ended};
@@ -405,7 +405,7 @@ fn backend_for(app: &AppHandle) -> Option<Backend> {
 /// The screen as it is right now, as JPEG bytes. Best-effort: a voice turn is still worth having
 /// without it, so every failure only reaches the debug log.
 async fn capture_screen(app: &AppHandle) -> Option<Vec<u8>> {
-    let shot = match capture_desktop_screenshot(app).await {
+    let shot = match capture_voice_screenshot(app).await {
         Ok(shot) => shot,
         Err(error) => {
             debug_log("voice", "screenshot_error", error);
