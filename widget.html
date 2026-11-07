@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Aloe widget</title>
+    <style>
+      :root {
+        --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
+        --moss: 200 243 106;
+        --gold-rgb: 226 196 138;
+        --cream: #ecebe4;
+        --cream-soft: rgb(236 235 228 / 0.62);
+        --surface: rgb(11 13 12 / 0.94);
+        --line: rgb(244 247 240 / 0.1);
+        --scale: 1;
+        color-scheme: dark;
+      }
+      [data-size="s"] { --scale: 0.9; }
+      [data-size="l"] { --scale: 1.12; }
+      [data-size="xl"] { --scale: 1.25; }
+      [data-contrast] { --cream: #ffffff; --cream-soft: #e8e8e8; --surface: rgb(0 0 0 / 0.98); --line: rgb(255 255 255 / 0.3); }
+
+      /* The window is transparent (voice/widgets.rs): only the card is painted. */
+      html, body { margin: 0; background: transparent; overflow: hidden; }
+      body { font: 400 13px/1.4 "Geist Variable", ui-sans-serif, system-ui, sans-serif; color: var(--cream); user-select: none; -webkit-user-select: none; }
+
+      .card {
+        position: relative;
+        margin: 8px;
+        padding: 10px 12px 12px;
+        border-radius: 16px;
+        background: var(--surface);
+        box-shadow: inset 0 0 0 1px rgb(var(--moss) / 0.25), 0 8px 24px rgb(0 0 0 / 0.35);
+        cursor: grab;
+        opacity: 0;
+        transform: scale(0.96);
+        transition: opacity 200ms ease, transform 260ms var(--ease-out), box-shadow 300ms ease;
+      }
+      .card[data-shown] { opacity: 1; transform: none; }
+      .card:active { cursor: grabbing; }
+
+      .head { display: flex; align-items: center; gap: 6px; min-height: 22px; }
+      .title { flex: 1; min-width: 0; font-size: calc(11px * var(--scale)); font-weight: 500; letter-spacing: 0.02em; color: var(--cream-soft); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+      .btn {
+        display: inline-grid; place-items: center;
+        width: 22px; height: 22px; padding: 0; border: 0; border-radius: 999px;
+        background: rgb(244 247 240 / 0.08); color: var(--cream);
+        font: inherit; font-size: 11px; line-height: 1; cursor: pointer;
+        transition: background 150ms ease, opacity 150ms ease;
+      }
+      .btn:hover { background: rgb(244 247 240 / 0.16); }
+      .btn:focus-visible { outline: 2px solid rgb(var(--moss)); outline-offset: 1px; }
+      .btn svg { width: 10px; height: 10px; fill: currentColor; }
+      .close { opacity: 0; }
+      .card:hover .close, .close:focus-visible { opacity: 1; }
+
+      .big { font-size: calc(30px * var(--scale)); font-weight: 500; font-variant-numeric: tabular-nums; letter-spacing: -0.01em; line-height: 1.15; margin-top: 2px; }
+      .big .sub { font-size: 0.55em; color: var(--cream-soft); }
+      .bar { height: 3px; margin-top: 8px; border-radius: 999px; background: var(--line); overflow: hidden; }
+      .bar > i { display: block; height: 100%; background: rgb(var(--moss)); transform-origin: 0 50%; transition: transform 250ms linear; }
+      [data-finished] .big { color: rgb(var(--gold-rgb)); }
+      [data-finished] .bar > i { background: rgb(var(--gold-rgb)); }
+
+      .zones { display: grid; gap: 4px; margin-top: 4px; }
+      .zone { display: flex; align-items: baseline; gap: 8px; }
+      .zone .city { flex: 1; min-width: 0; font-size: calc(12px * var(--scale)); color: var(--cream-soft); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+      .zone .time { font-size: calc(18px * var(--scale)); font-weight: 500; font-variant-numeric: tabular-nums; }
+      .zone .day { font-size: calc(10px * var(--scale)); color: var(--cream-soft); min-width: 2.6em; text-align: right; }
+      .date { font-size: calc(12px * var(--scale)); color: var(--cream-soft); }
+
+      .text { margin-top: 4px; white-space: pre-wrap; overflow-wrap: anywhere; font-size: calc(13px * var(--scale)); cursor: text; border-radius: 6px; outline: none; padding: 2px 4px; margin-left: -4px; margin-right: -4px; }
+      .text:focus { background: rgb(244 247 240 / 0.06); user-select: text; -webkit-user-select: text; }
+      .items { list-style: none; margin: 6px 0 0; padding: 0; display: grid; gap: 3px; }
+      .items label { display: flex; align-items: flex-start; gap: 8px; cursor: pointer; font-size: calc(13px * var(--scale)); }
+      .items input { margin: 3px 0 0; accent-color: rgb(var(--moss)); cursor: pointer; }
+      .items .done span { color: var(--cream-soft); text-decoration: line-through; }
+
+      /* A timer that has run out pulses until it is clicked. */
+      @keyframes ring { 0%, 100% { box-shadow: inset 0 0 0 1px rgb(var(--gold-rgb) / 0.5), 0 8px 24px rgb(0 0 0 / 0.35); } 50% { box-shadow: inset 0 0 0 2px rgb(var(--gold-rgb)), 0 0 0 6px rgb(var(--gold-rgb) / 0.25), 0 8px 24px rgb(0 0 0 / 0.35); } }
+      .card[data-ringing] { animation: ring 1.1s ease-in-out infinite; }
+
+      @media (prefers-reduced-motion: reduce) {
+        .card { transition: opacity 150ms ease; transform: none; }
+        .card[data-ringing] { animation: none; box-shadow: inset 0 0 0 2px rgb(var(--gold-rgb)), 0 8px 24px rgb(0 0 0 / 0.35); }
+        .bar > i { transition: none; }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="card" id="card"></div>
+    <script type="module" src="/src/widget.ts"></script>
+  </body>
+</html>

@@ -18,7 +18,7 @@ use crate::terminal::TerminalSession;
 
 /// Backend the agent talks to in a release build. `ALOE_BACKEND_URL` overrides it at compile time;
 /// debug builds default to a local backend instead. See `default_api_url`.
-pub const FALLBACK_PROD_API_URL: &str = "https://api.247autoarmy.in/";
+pub const FALLBACK_PROD_API_URL: &str = "https://api.askaloe.in/";
 /// Backend used by debug builds.
 pub const FALLBACK_DEBUG_API_URL: &str = "http://127.0.0.1:8080";
 

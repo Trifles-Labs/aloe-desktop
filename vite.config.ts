@@ -8,7 +8,7 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 
 export default defineConfig(({ command, mode }) => {
   const env = loadEnv(mode, here, "");
-  const backendUrl = env.ALOE_BACKEND_URL ?? (command === "serve" ? "http://127.0.0.1:8080" : "https://api.247autoarmy.in");
+  const backendUrl = env.ALOE_BACKEND_URL ?? (command === "serve" ? "http://127.0.0.1:8080" : "https://api.askaloe.in");
   const frontendUrl = env.ALOE_FRONTEND_URL ?? (command === "serve" ? "http://localhost:3000" : "https://aloe.247autoarmy.in");
 
   /* Dev only: errors thrown in the Tauri window (see index.html's dev hook) are echoed into this
@@ -105,6 +105,7 @@ console.error = (...args) => { send(args.map((a) => a?.stack ?? (typeof a === "s
           overlay: path.resolve(here, "overlay.html"),
           voice: path.resolve(here, "voice.html"),
           intro: path.resolve(here, "intro.html"),
+          widget: path.resolve(here, "widget.html"),
         },
       },
     },

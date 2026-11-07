@@ -442,6 +442,27 @@ fn voice_overlay_drawing() -> voice::drawing::Drawing {
     voice::drawing::current()
 }
 
+/// What a widget's freshly loaded page (widget.html) should show; `None` once it was closed.
+#[tauri::command]
+fn widget_state(app: AppHandle, id: String) -> Option<voice::widgets::Widget> {
+    voice::widgets::state(&app, &id)
+}
+
+/// A click on a widget: `{ op: "pause" | "resume" | "reset" | "check" | "text" | "items", ... }`.
+#[tauri::command]
+fn widget_action(app: AppHandle, id: String, action: serde_json::Value) -> Result<voice::widgets::Widget, String> {
+    if action.get("op").and_then(serde_json::Value::as_str) == Some("move") {
+        return Err("Drag the widget to move it.".into());
+    }
+    voice::widgets::act(&app, &id, &action)
+}
+
+/// The widget's own close button.
+#[tauri::command]
+fn widget_close(app: AppHandle, id: String) {
+    voice::widgets::close(&app, &id);
+}
+
 /// What a freshly loaded voice overlay page should show.
 #[tauri::command]
 fn voice_overlay_state() -> voice::overlay::View {
@@ -787,6 +808,9 @@ pub fn run() {
             voice_hotkey_allowed,
             open_voice_intro,
             close_voice_intro,
+            widget_state,
+            widget_action,
+            widget_close,
             sync_folders,
             add_folder,
             remove_folder,
@@ -876,13 +900,22 @@ pub fn run() {
                 socket::socket_loop(handle).await;
             });
             voice::start(app.handle());
+            voice::widgets::start(app.handle());
             Ok(())
         })
         .on_menu_event(|app, event| desktop::handle_menu_event(app, event.id().as_ref()))
         .on_tray_icon_event(desktop::handle_tray_event)
         .on_window_event(|window, event| {
+            if let tauri::WindowEvent::Moved(position) = event {
+                if window.label().starts_with(voice::widgets::LABEL_PREFIX) {
+                    voice::widgets::moved(window.app_handle(), window.label(), *position);
+                }
+            }
             // Only the main window hides to the tray; every other window closes for real.
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                if let Some(id) = window.label().strip_prefix(voice::widgets::LABEL_PREFIX) {
+                    voice::widgets::forget(window.app_handle(), id);
+                }
                 if window.label() != "main" {
                     return;
                 }

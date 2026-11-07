@@ -548,6 +548,8 @@ async fn run_tool(
         "show_notification"      => show_notification(app, &job.input).await,
         // Marks over the screen during a voice reply (voice/drawing.rs).
         "draw_on_screen"         => crate::voice::drawing::apply(app, &job.input).await,
+        // Timers, clocks and notes kept on the screen (voice/widgets.rs).
+        "screen_widgets"         => crate::voice::widgets::apply(app, &job.input).await,
         // Deprecated (see browser.rs): kept for backends that still dispatch browser_ jobs.
         // Self-contained (its own Chrome process and CDP connection), so it needs neither config
         // nor AppState.

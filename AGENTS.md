@@ -13,7 +13,7 @@ bun run tauri:build                  # native installers
 cargo check --manifest-path src-tauri/Cargo.toml   # fast Rust check
 ```
 
-Debug builds talk to `http://127.0.0.1:8080`; release builds to `https://api.247autoarmy.in/`. Override at build time with `ALOE_BACKEND_URL`. Don't run `tauri:build` unless asked.
+Debug builds talk to `http://127.0.0.1:8080`; release builds to `https://api.askaloe.in/`. Override at build time with `ALOE_BACKEND_URL`. Don't run `tauri:build` unless asked.
 
 ## Layout
 

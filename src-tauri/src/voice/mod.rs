@@ -28,6 +28,7 @@ pub mod drawing;
 mod latency;
 pub mod hotkey;
 pub mod overlay;
+pub mod widgets;
 mod prompts;
 mod realtime;
 mod relay;

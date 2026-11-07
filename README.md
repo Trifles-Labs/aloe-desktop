@@ -80,7 +80,7 @@ bun run tauri:build
 4. Grant folders that Aloe is allowed to inspect or modify.
 5. Review command approvals from the Desktop controls page when commands are requested.
 
-In debug builds, the app defaults to `http://127.0.0.1:8080` for the Aloe backend. In release builds, it defaults to `https://api.247autoarmy.in/`.
+In debug builds, the app defaults to `http://127.0.0.1:8080` for the Aloe backend. In release builds, it defaults to `https://api.askaloe.in/`.
 
 To compile against a different backend URL, set `ALOE_BACKEND_URL` at build time:
 

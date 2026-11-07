@@ -63,6 +63,8 @@ pub struct AgentConfig {
     /// Files Aloe handed the user in chat (shared_files.rs), newest first. A chat card carries only
     /// the id; opening it looks the path up here.
     pub shared_files: Vec<SharedFile>,
+    /// Timers, clocks and notes voice left on the screen (voice/widgets.rs), with where they sit.
+    pub widgets: Vec<crate::voice::widgets::Widget>,
     /// The scratch folder of the conversation the current job belongs to (scratchpad.rs). Set only
     /// on the per-job copy `executor::dispatch_tool` checks paths against, never saved.
     #[serde(skip)]
