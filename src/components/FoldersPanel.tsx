@@ -14,6 +14,16 @@ type Props = {
   onRemove: (path: string) => void;
 };
 
+/** Grants are stored canonicalized, which on Windows means `\\?\C:\...` (and
+    `\\?\UNC\server\share` for a share). Those prefixes are how the OS spells a
+    path to itself, not how a person writes one: the row shows the plain form.
+    Only the display is rewritten — the grant, its tooltip and `onRemove` keep
+    the exact stored path, since that is what the backend and Rust compare. */
+function displayPath(path: string): string {
+  if (path.startsWith("\\\\?\\UNC\\")) return `\\\\${path.slice(8)}`;
+  return path.startsWith("\\\\?\\") ? path.slice(4) : path;
+}
+
 export function FoldersPanel({ folders, onAdd, onRemove }: Props) {
   const reduceMotion = useReducedMotion();
 
@@ -51,8 +61,8 @@ export function FoldersPanel({ folders, onAdd, onRemove }: Props) {
                 <Folder className="mt-0.5 h-4 w-4 shrink-0 text-moss" />
                 <div className="min-w-0">
                   <p className="truncate text-[13px] font-medium leading-5 text-ink">{folder.label ?? "Folder"}</p>
-                  <p className="truncate font-mono text-[11px] leading-5 text-ink-soft" title={folder.path}>
-                    {folder.path}
+                  <p className="truncate font-mono text-[11px] leading-5 text-ink-soft" title={displayPath(folder.path)}>
+                    {displayPath(folder.path)}
                   </p>
                 </div>
               </div>
@@ -63,12 +73,12 @@ export function FoldersPanel({ folders, onAdd, onRemove }: Props) {
                   onClick={() => onRemove(folder.path)}
                   title={`Remove ${folder.label ?? folder.path}`}
                   aria-label={`Remove ${folder.label ?? folder.path}`}
-                  /* Quiet until wanted, and only where a real pointer exists —
-                     Tailwind's `hover:` already carries the (hover: hover) query.
-                     The transitions are spelled out rather than using `.press-tap`:
-                     a `transition-*` utility sorts after that layer and would
-                     replace its whole property list, silently dropping one. */
-                  className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-ink-soft opacity-0 transition-[opacity,background-color,color,transform] duration-150 hover:bg-clay/12 hover:text-danger focus-visible:opacity-100 active:scale-[0.97] motion-reduce:active:scale-100 group-hover:opacity-100"
+                  /* Quiet until wanted, but not only where a pointer can hover: hiding it behind
+                     `group-hover` left it unreachable on a pen or touch screen, where `:hover`
+                     never fires. The opacity is gated on the same media query Tailwind's own
+                     `hover:` uses, so a mouse still sees a clean row and every other device sees
+                     the button. */
+                  className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-ink-soft transition-[opacity,background-color,color,transform] duration-150 hover:bg-clay/12 hover:text-danger focus-visible:opacity-100 active:scale-[0.97] motion-reduce:active:scale-100 [@media(hover:hover)]:opacity-0 [@media(hover:hover)]:group-hover:opacity-100"
                 >
                   <Trash2 className="h-4 w-4" />
                 </button>

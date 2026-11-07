@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useId, useState } from "react";
 import Link from "next/link";
 import { motion, useReducedMotion } from "framer-motion";
 import { ArrowUpRight, CheckCircle2, RefreshCw, ShieldAlert, ShieldCheck } from "lucide-react";
@@ -23,7 +23,11 @@ const commandModes: Array<{ mode: CommandTrustMode; title: string; description: 
   {
     mode: "auto",
     title: "Auto",
-    description: "Aloe asks its own model to judge each command against the conversation before running it. Anything destructive still waits for you no matter what the model decides.",
+    /* No local override sits in front of the judge: `check_command_safety` (executor.rs) is the
+       whole gate in this mode, so the copy must not promise a second one. A declined command is
+       refused outright rather than queued; only a check that could not run falls back to asking. */
+    description:
+      "Aloe asks its own model to judge each command against the conversation before running it. A command it declines does not run; if the check cannot be reached, the command waits for you instead.",
   },
   {
     mode: "all",
@@ -35,6 +39,11 @@ const commandModes: Array<{ mode: CommandTrustMode; title: string; description: 
 export function ApprovalsPanel({ config, pending, onRefresh, onSetCommandTrustMode }: Props) {
   const reduceMotion = useReducedMotion();
   const [refreshing, setRefreshing] = useState(false);
+  /* Descriptions are read out after the option's name, not folded into it: without this the
+     radio's accessible name is the title and the whole paragraph, which screen readers announce
+     as one very long option. */
+  const descriptionId = useId();
+  const nothingWaiting = pending.length === 0;
 
   const refresh = () => {
     // The spin is the acknowledgement — the call itself usually returns before
@@ -57,11 +66,28 @@ export function ApprovalsPanel({ config, pending, onRefresh, onSetCommandTrustMo
           Refresh
         </button>
       }
+      /* "Nothing waiting" used to be a fourth row inside the sheet, separated by the same hairline
+         as the choices — which read as a fourth option. It is a status line about the queue, so it
+         belongs under the group, where the "allow all" warning already lives. */
       footnote={
-        config.commandTrustMode === "all" ? (
-          <span className="flex items-start gap-1.5 text-gold">
-            <ShieldAlert className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-            Aloe can run anything your account can, including deleting files. Use this only in a workspace you fully trust.
+        config.commandTrustMode === "all" || nothingWaiting ? (
+          <span className="flex flex-col gap-1.5">
+            {config.commandTrustMode === "all" ? (
+              <span className="flex items-start gap-1.5 text-gold">
+                <ShieldAlert className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                Aloe can run anything your account can, including deleting files. Use this only in a workspace you fully trust.
+              </span>
+            ) : null}
+            {nothingWaiting ? (
+              <span className="flex items-start gap-1.5">
+                {config.commandTrustMode === "ask" ? (
+                  <CheckCircle2 className="mt-0.5 h-3.5 w-3.5 shrink-0 text-moss" />
+                ) : (
+                  <ShieldCheck className="mt-0.5 h-3.5 w-3.5 shrink-0 text-moss" />
+                )}
+                Nothing waiting for approval.
+              </span>
+            ) : null}
           </span>
         ) : undefined
       }
@@ -88,6 +114,8 @@ export function ApprovalsPanel({ config, pending, onRefresh, onSetCommandTrustMo
                 name="command-trust-mode"
                 className="peer sr-only"
                 checked={selected}
+                aria-label={option.title}
+                aria-describedby={`${descriptionId}-${option.mode}`}
                 onChange={() => onSetCommandTrustMode(option.mode)}
               />
               <span
@@ -100,7 +128,9 @@ export function ApprovalsPanel({ config, pending, onRefresh, onSetCommandTrustMo
               </span>
               <span className="relative min-w-0 flex-1">
                 <span className="block text-[13px] font-medium leading-5 text-ink">{option.title}</span>
-                <span className="mt-0.5 block text-xs leading-5 text-ink-soft">{option.description}</span>
+                <span id={`${descriptionId}-${option.mode}`} className="mt-0.5 block max-w-[62ch] text-xs leading-5 text-ink-soft">
+                  {option.description}
+                </span>
               </span>
             </label>
           );
@@ -110,18 +140,7 @@ export function ApprovalsPanel({ config, pending, onRefresh, onSetCommandTrustMo
       {/* Local commands share the approvals queue with email, calendar and
           GitHub actions — /app/approvals is the one place any of them is
           decided, from this device or the web. */}
-      {pending.length === 0 ? (
-        <div className="settings-row">
-          <span className="flex items-center gap-3 text-[13px] leading-5 text-ink-soft">
-            {config.commandTrustMode === "ask" ? (
-              <CheckCircle2 className="h-4 w-4 shrink-0 text-moss" />
-            ) : (
-              <ShieldCheck className="h-4 w-4 shrink-0 text-moss" />
-            )}
-            Nothing waiting for approval.
-          </span>
-        </div>
-      ) : (
+      {pending.length > 0 ? (
         <Link href="/app/approvals" className="settings-row press-tap group hover:bg-sage-soft/50">
           <span className="min-w-0">
             <span className="block text-[13px] font-medium leading-5 text-ink">
@@ -131,7 +150,7 @@ export function ApprovalsPanel({ config, pending, onRefresh, onSetCommandTrustMo
           </span>
           <ArrowUpRight className="h-4 w-4 shrink-0 text-moss transition-transform duration-150 motion-safe:group-hover:-translate-y-px motion-safe:group-hover:translate-x-px" />
         </Link>
-      )}
+      ) : null}
     </ControlGroup>
   );
 }

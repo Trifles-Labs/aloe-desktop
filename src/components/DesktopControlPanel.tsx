@@ -20,7 +20,10 @@ export function DesktopControlPanel({ enabled, onSetEnabled }: Props) {
         enabled ? (
           <span className="flex items-start gap-1.5 text-gold">
             <ShieldAlert className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-            Aloe can click and type in any app you're signed into, including your browser. A green glow around your screen shows when it's working. To stop it, click Stop at the top of the screen or move the pointer into any corner.
+            {/* Named for what it is: desktop control reaches a Run dialog and a terminal, so the
+                command-approval modes above do not constrain it. Saying only "click and type"
+                understated the switch, and the glow is the only thing left to notice it by. */}
+            Aloe can click and type in any app you are signed into — your browser, a terminal, a Run dialog — so it can start programs and run commands without the command approvals above. A green glow around your screen shows when it is working. To stop it, click Stop at the top of the screen, or move the pointer into any corner.
           </span>
         ) : undefined
       }
