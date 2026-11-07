@@ -14,6 +14,7 @@ import { isLocalChatId } from "@aloe/ui/lib/local_code_chats";
 import type { Platform } from "@aloe/ui/lib/platform";
 import type { LocalSkillSummary, User } from "@aloe/ui/lib/types";
 import DesktopConnectModal from "./components/DesktopConnectModal";
+import { APP_URL, openExternal } from "./lib/desktop";
 import { localCodeStore } from "./code/chatStore";
 import { isCodeSession } from "./code/sessions";
 import DesktopAppPane from "./settings/DesktopAppPane";
@@ -65,6 +66,9 @@ export function useDesktopPlatform(config: AgentConfig, onSignOut: () => void) {
       codeStore: localCodeStore,
       // Files Aloe shared in chat, opened by the id this computer minted (shared_files.rs).
       openSharedFile: (shareId, { reveal }) => invoke<void>("shared_file_open", { id: shareId, reveal }),
+      // Razorpay Checkout runs in the browser, not this webview; the new plan reaches the app
+      // through /api/usage once it's paid.
+      openUpgrade: (tier) => void openExternal(`${APP_URL}/app/plans?upgrade=${tier}`),
       // Skills in ~/.agents/skills and Claude Code's and Codex's skill folders (local_skills.rs).
       localSkills: {
         list: () => invoke<LocalSkillSummary[]>("local_skills_list"),
