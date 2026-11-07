@@ -76,12 +76,19 @@ pub fn share_file(state: &State<'_, AppState>, config: &AgentConfig, input: &Val
 
 /// Resolves a share id to a path this device may still open, or says why not.
 fn resolve(config: &AgentConfig, id: &str) -> Result<std::path::PathBuf, String> {
+    resolve_in(config, crate::scratchpad::scratchpad_root(), id)
+}
+
+/// A file Aloe shared from a conversation's scratch folder stays openable: the share itself was
+/// checked against that conversation's folder, and a card has no conversation to scope it to.
+fn resolve_in(config: &AgentConfig, scratchpad: Option<&Path>, id: &str) -> Result<std::path::PathBuf, String> {
     let entry = config
         .shared_files
         .iter()
         .find(|entry| entry.id == id)
         .ok_or("This file was shared on another computer, or too long ago. Ask Aloe to find it again.")?;
-    let path = assert_granted(config, &entry.path)
+    let scoped = scratchpad.map(|root| AgentConfig { scratchpad_session: Some(root.to_path_buf()), ..config.clone() });
+    let path = assert_granted(scoped.as_ref().unwrap_or(config), &entry.path)
         .map_err(|_| "Aloe no longer has access to the folder this file is in.".to_string())?;
     if !path.is_file() {
         return Err("This file has been moved or deleted.".to_string());
@@ -145,5 +152,21 @@ mod tests {
         std::fs::remove_file(&file).unwrap();
         assert!(resolve(&config, "one").unwrap_err().contains("moved or deleted"));
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn resolve_opens_files_shared_from_the_scratchpad() {
+        let root = crate::scratchpad::tests::temp_root("share");
+        std::fs::create_dir_all(root.join("conv1")).unwrap();
+        let file = root.join("conv1").join("out.pdf");
+        std::fs::write(&file, "x").unwrap();
+
+        let config = AgentConfig {
+            shared_files: vec![SharedFile { id: "one".into(), path: file.to_string_lossy().to_string(), shared_at: String::new() }],
+            ..Default::default()
+        };
+        assert!(resolve_in(&config, Some(&root), "one").is_ok());
+        assert!(resolve_in(&config, None, "one").unwrap_err().contains("no longer has access"));
+        let _ = std::fs::remove_dir_all(&root);
     }
 }
