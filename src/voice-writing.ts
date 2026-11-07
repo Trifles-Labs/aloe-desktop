@@ -17,7 +17,7 @@ const MS_PER_TEX_CHAR = 20;
 const WORD_GAP_MS = 50;
 const LINE_GAP_MS = 180;
 /** However much is written at once, it's all there by then. */
-const MAX_MS = 8000;
+const MAX_MS = 4000;
 
 type Piece = { element: HTMLElement; ms: number; pause: number };
 /** One line, list item, code fence or display formula, and the source text it came from. */

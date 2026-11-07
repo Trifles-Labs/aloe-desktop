@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import { write } from "./voice-writing";
+import { markdownBlocks, write } from "./voice-writing";
 
 /* Marks Aloe draws over the screen during a voice reply (voice/drawing.rs): highlights, boxes,
    circles, underlines, arrows, curves, polygons, ellipses, labels, notes and handwriting
@@ -33,15 +33,17 @@ const COLORS: Record<string, string> = {
   yellow: "#ffd400",
   green: "#30d158",
   red: "#ff453a",
-  blue: "#0a84ff",
+  blue: "#4da3ff",
   orange: "#ff9f0a",
-  purple: "#bf5af2",
+  purple: "#c983ff",
   white: "#ffffff",
   black: "#1f2430",
 };
 /** How fast the pen moves, in pixels per millisecond. */
 const PEN_SPEED = 1.5;
 const MARK_GAP_MS = 140;
+/** However many marks come at once, they are all drawn by then. */
+const DRAW_BUDGET_MS = 5000;
 const SVG = "http://www.w3.org/2000/svg";
 
 const layer = document.getElementById("marks") as unknown as SVGSVGElement;
@@ -117,10 +119,14 @@ const figure = (d: string, mark: Mark) => {
 const pill = (mark: Mark, at: Point) => {
   const note = document.createElement("div");
   note.className = `note ${mark.size ?? "normal"}`;
+  if (mark.color === "black") note.dataset.paper = "light";
   note.style.setProperty("--accent", colorOf(mark));
   note.style.left = `${at.x}px`;
   note.style.top = `${at.y}px`;
-  note.textContent = mark.text ?? "";
+  const text = mark.text ?? "";
+  // A tag with maths in it ("$8$ cm", "$45^\circ$") is set by KaTeX like handwriting is.
+  if (/\$[^$]+\$|\\\(.+?\\\)/.test(text)) note.append(...markdownBlocks(text).map((block) => block.element));
+  else note.textContent = text;
   return note;
 };
 
@@ -190,10 +196,17 @@ const build = (mark: Mark): { pieces: SVGElement[]; note?: HTMLElement; writes?:
     case "label": {
       if (!hasBox || !mark.target) return { pieces: [] };
       const target = px(mark.target);
+      // The tag has no chip to hide a line under it, so the line starts at the edge of its words
+      // (roughly: an ellipse around the text) rather than crossing them from the centre.
+      const [dx, dy] = [target.x - corner.x, target.y - corner.y];
+      const length = Math.hypot(dx, dy) || 1;
+      const [rx, ry] = [Math.min(150, (mark.text ?? "").length * 6.5 + 8), 20];
+      const edge = Math.min(length * 0.8, 1 / Math.hypot(dx / length / rx, dy / length / ry));
+      const start = { x: corner.x + (dx / length) * edge, y: corner.y + (dy / length) * edge };
       return {
         pieces: [
-          stroke(`M${corner.x},${corner.y} L${target.x},${target.y}`, mark, { "stroke-width": 2.5 }),
-          shape("circle", { cx: target.x, cy: target.y, r: 5, fill: color, class: "pop" }),
+          stroke(`M${start.x},${start.y} L${target.x},${target.y}`, mark, { "stroke-width": 2.5 }),
+          shape("circle", { cx: target.x, cy: target.y, r: 4, fill: color, class: "pop" }),
         ],
         note: pill(mark, corner),
       };
@@ -205,7 +218,7 @@ const build = (mark: Mark): { pieces: SVGElement[]; note?: HTMLElement; writes?:
       const { element, duration } = write(mark.text ?? "");
       const note = document.createElement("div");
       note.className = `write ${mark.size ?? "normal"}`;
-      note.dataset.ink = mark.color === "white" || mark.color === "yellow" ? "light" : "dark";
+      if (mark.color === "black") note.dataset.paper = "light";
       note.style.setProperty("--accent", color);
       note.style.left = `${corner.x}px`;
       note.style.top = `${corner.y}px`;
@@ -230,16 +243,24 @@ const penAlong = (d: string, at: number, ms: number, color: string) => {
   notes.append(pen);
 };
 
-/* When one piece is drawn and for how long, from `at`; returns when the next one starts. */
-const schedule = (piece: SVGElement, at: number): number => {
-  let ms = 220;
-  if (piece.classList.contains("ink")) ms = clamp((piece as SVGGeometryElement).getTotalLength() / PEN_SPEED, 160, 1200);
-  else if (piece.classList.contains("marker")) ms = clamp((piece as SVGGraphicsElement).getBBox().width / (PEN_SPEED * 1.3), 200, 900);
+/* How long one piece takes to draw at the pen's own pace. */
+const durationOf = (piece: SVGElement): number => {
+  if (piece.classList.contains("ink")) return clamp((piece as SVGGeometryElement).getTotalLength() / PEN_SPEED, 160, 1200);
+  if (piece.classList.contains("marker")) return clamp((piece as SVGGraphicsElement).getBBox().width / (PEN_SPEED * 1.3), 200, 900);
+  return 220;
+};
+/* How long it holds the next piece back: a dot pops in quicker than it animates. */
+const stepOf = (piece: SVGElement, ms: number) => (piece.classList.contains("pop") ? 120 : ms);
+
+/* When one piece is drawn and for how long, from `at`, at `pace` (1 is the pen's own speed); returns
+   when the next one starts. */
+const schedule = (piece: SVGElement, at: number, pace: number): number => {
+  const ms = durationOf(piece) * pace;
   piece.style.setProperty("--delay", `${Math.round(at)}ms`);
   piece.style.setProperty("--dur", `${Math.round(ms)}ms`);
   const pen = piece.getAttribute("data-pen");
   if (pen) penAlong(pen, at, ms, piece.getAttribute("stroke") ?? piece.getAttribute("fill") ?? "#fff");
-  return at + (piece.classList.contains("pop") ? 120 : ms);
+  return at + stepOf(piece, ms);
 };
 
 /* ---- The clear chip's hit area, as for the island ---- */
@@ -254,6 +275,56 @@ const placeChip = () => {
   if (!drawing.marks.length) return reportChip(null);
   const box = chip.getBoundingClientRect();
   reportChip({ x: box.x, y: box.y, width: box.width, height: box.height });
+};
+
+type Area = { left: number; right: number; top: number; bottom: number };
+/** Space kept between a moved piece of handwriting and the words above it. */
+const WRITE_GAP = 8;
+
+/** Handwriting this short ("A", "7 cm", "$45^\circ$") names part of a figure and is meant to sit
+ * right by its strokes, so only words and tags move it, not the figure. */
+const SHORT_WRITE = 12;
+/** Spacing of the points sampled along each stroke, px. */
+const INK_STEP = 6;
+
+/* Points along every stroke drawn (lines, rays, lenses, shapes), to tell whether handwriting would
+   cover a figure. Sampled along the stroke, not its bounding box, so a long diagonal ray doesn't
+   claim the whole rectangle around it. */
+const inkPoints = (): { x: number; y: number }[] => {
+  const points: { x: number; y: number }[] = [];
+  for (const shape of Array.from(layer.querySelectorAll<SVGGeometryElement>("path, line, polyline, polygon, ellipse, circle, rect"))) {
+    let length = 0;
+    try {
+      length = shape.getTotalLength();
+    } catch {
+      continue;
+    }
+    for (let at = 0; at <= length; at += INK_STEP) {
+      const p = shape.getPointAtLength(at);
+      points.push({ x: p.x, y: p.y });
+    }
+  }
+  return points;
+};
+
+/* How far down a piece of handwriting must move to clear what is already there: other writing and
+   tags, and (unless it is a short label) the strokes of figures. Aloe picks where each one goes
+   without knowing how tall its maths will set (a nested fraction stands three lines high), so
+   working written in a column can land on the next line, or on a diagram drawn below it. */
+const clearBelow = (box: DOMRect, taken: Area[], ink: { x: number; y: number }[]): number => {
+  let down = 0;
+  for (let round = 0; round < 200; round++) {
+    const [top, bottom] = [box.top + down, box.bottom + down];
+    const words = taken.filter((other) => box.left < other.right && box.right > other.left && top < other.bottom && bottom > other.top);
+    if (words.length) {
+      down = Math.max(...words.map((other) => other.bottom)) + WRITE_GAP - box.top;
+      continue;
+    }
+    const pad = 4;
+    if (!ink.some((p) => p.x > box.left - pad && p.x < box.right + pad && p.y > top - pad && p.y < bottom + pad)) break;
+    down += INK_STEP;
+  }
+  return down;
 };
 
 const FADE_MS = 450;
@@ -280,35 +351,57 @@ const render = (next: Drawing, animate: boolean) => {
   notes.replaceChildren();
   root.setAttribute("data-marks", "");
   layer.setAttribute("viewBox", `0 0 ${window.innerWidth} ${window.innerHeight}`);
-  let clock = 0;
+  const fresh: { pieces: SVGElement[]; note?: HTMLElement; writes?: number }[] = [];
   next.marks.forEach((mark, index) => {
-    const { pieces, note, writes } = build(mark);
-    const fresh = animate && index >= next.freshFrom && !reducedMotion.matches;
+    const built = build(mark);
+    const isFresh = animate && index >= next.freshFrom && !reducedMotion.matches;
     // Leader lines go under every pill, so a pill is never crossed out by another mark's line.
-    const group = shape("g", { class: fresh ? "mark fresh" : "mark" });
-    group.append(...pieces);
+    const group = shape("g", { class: isFresh ? "mark fresh" : "mark" });
+    group.append(...built.pieces);
     layer.append(group);
-    if (note) {
-      if (fresh) note.classList.add("fresh");
-      notes.append(note);
+    if (built.note) {
+      if (isFresh) built.note.classList.add("fresh");
+      notes.append(built.note);
     }
-    if (!fresh) return;
-    // Measured once in the page: each piece after the last, then its words.
+    if (isFresh) fresh.push(built);
+  });
+  // Measured once in the page: each piece after the last, then its words. At the pen's own pace a
+  // diagram and its working took half a minute to appear, so a batch that would run past
+  // DRAW_BUDGET_MS is sped up, every stroke and word alike, to finish in it.
+  const natural = fresh.reduce(
+    (sum, { pieces, note, writes }) => sum + pieces.reduce((s, piece) => s + stepOf(piece, durationOf(piece)), 0) + (note ? (writes ?? 260) : 0) + MARK_GAP_MS,
+    0,
+  );
+  const pace = natural > DRAW_BUDGET_MS ? DRAW_BUDGET_MS / natural : 1;
+  let clock = 0;
+  for (const { pieces, note, writes } of fresh) {
     let at = clock;
-    for (const piece of pieces) at = schedule(piece, at);
+    for (const piece of pieces) at = schedule(piece, at, pace);
     if (note) {
       note.style.setProperty("--delay", `${Math.round(at)}ms`);
-      at += writes ?? 260;
+      note.style.setProperty("--pace", String(pace));
+      at += (writes ?? 260) * pace;
     }
-    clock = at + MARK_GAP_MS;
-  });
-  // Words near an edge are nudged back onto the screen once they have a size.
+    clock = at + MARK_GAP_MS * pace;
+  }
+  // Once the words have a size: handwriting that lands on earlier words moves down below them, and
+  // anything near an edge is nudged back onto the screen.
   requestAnimationFrame(() => {
-    for (const note of Array.from(notes.querySelectorAll<HTMLElement>(".note, .write"))) {
+    const all = Array.from(notes.querySelectorAll<HTMLElement>(".note, .write"));
+    // Tags stay where they are, and every one is in the way from the start, wherever it comes in
+    // the order; handwriting moves around them, around earlier handwriting, and around figures.
+    const area = (box: DOMRect, dx = 0, dy = 0): Area => ({ left: box.left + dx, right: box.right + dx, top: box.top + dy, bottom: box.bottom + dy });
+    const taken: Area[] = all.filter((note) => note.classList.contains("note")).map((note) => area(note.getBoundingClientRect()));
+    const ink = inkPoints();
+    for (const note of all) {
       const box = note.getBoundingClientRect();
+      const writing = note.classList.contains("write");
+      const short = (note.textContent ?? "").trim().length <= SHORT_WRITE;
+      const down = writing ? clearBelow(box, taken, short ? [] : ink) : 0;
       const dx = Math.max(8 - box.left, 0) + Math.min(window.innerWidth - 8 - box.right, 0);
-      const dy = Math.max(8 - box.top, 0) + Math.min(window.innerHeight - 8 - box.bottom, 0);
+      const dy = down + Math.max(8 - box.top - down, 0) + Math.min(window.innerHeight - 8 - box.bottom - down, 0);
       if (dx || dy) note.style.translate = `${dx}px ${dy}px`;
+      if (writing) taken.push(area(box, dx, dy));
     }
     placeChip();
   });
