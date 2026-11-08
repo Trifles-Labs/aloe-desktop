@@ -80,4 +80,18 @@ jobs:
           releaseName: "Aloe Desktop ${{ github.ref_name }}"
           releaseDraft: false
           prerelease: false
+          # The body is what the GitHub release page shows and what the updater's
+          # "Update ready" modal reads out of latest.json. Keep it to what a person
+          # using the app would notice.
+          releaseBody: |
+            ## What's new
+
+            **Skill store** — browse skills, see their versions, and update them from the store without leaving the app. Skills that are coming later now show a card too.
+
+            **Plans** — the new Go plan and the updated prices are in the plans screen.
+
+            ## Fixes
+
+            - The command-palette shortcut in the sidebar now reads `Ctrl + K` (`⌘ + K` on macOS) instead of running the modifier and the key together.
+
           args: ${{ matrix.args }}
