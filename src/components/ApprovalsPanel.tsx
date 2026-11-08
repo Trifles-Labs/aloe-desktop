@@ -1,9 +1,7 @@
 import React, { useId, useState } from "react";
 import Link from "next/link";
-import { motion, useReducedMotion } from "framer-motion";
 import { ArrowUpRight, CheckCircle2, RefreshCw, ShieldAlert, ShieldCheck } from "lucide-react";
 
-import { SPRING_MOVE } from "@aloe/ui/lib/motion";
 import type { AgentConfig, CommandTrustMode, PendingApproval } from "../types";
 import { ControlGroup } from "./ControlGroup";
 
@@ -37,7 +35,6 @@ const commandModes: Array<{ mode: CommandTrustMode; title: string; description: 
 ];
 
 export function ApprovalsPanel({ config, pending, onRefresh, onSetCommandTrustMode }: Props) {
-  const reduceMotion = useReducedMotion();
   const [refreshing, setRefreshing] = useState(false);
   /* Descriptions are read out after the option's name, not folded into it: without this the
      radio's accessible name is the title and the whole paragraph, which screen readers announce
@@ -92,23 +89,21 @@ export function ApprovalsPanel({ config, pending, onRefresh, onSetCommandTrustMo
         ) : undefined
       }
     >
-      <div role="radiogroup" aria-label="Command approvals">
+      <div role="radiogroup" aria-label="Command approvals" className="flex flex-col gap-2 pt-2">
         {commandModes.map((option) => {
           const selected = config.commandTrustMode === option.mode;
+          /* Each option is its own card: the background is the card, so hover and
+             selection cover the option completely and the gap between cards is the
+             separation. A full-width band with rounded corners could only ever cut
+             the corners out of the row it sat in. `border-0` drops the hairline a
+             `.settings-row` normally takes from its previous sibling. */
           return (
-            <label key={option.mode} className="settings-row relative cursor-pointer items-start transition-colors duration-150 hover:bg-sage-soft/40">
-              {/* One marker for the group: it travels to the option you picked
-                  rather than blinking on there, which is what tells you what you
-                  just left. */}
-              {selected ? (
-                <motion.span
-                  aria-hidden
-                  layoutId="trust-mode-marker"
-                  transition={reduceMotion ? { duration: 0 } : SPRING_MOVE}
-                  className="absolute inset-0 bg-sage-soft"
-                />
-              ) : null}
-
+            <label
+              key={option.mode}
+              className={`settings-row relative cursor-pointer items-start rounded-xl border-0 px-3 transition-colors duration-200 ${
+                selected ? "bg-sage-soft" : "hover:bg-sage-soft/40"
+              }`}
+            >
               <input
                 type="radio"
                 name="command-trust-mode"
