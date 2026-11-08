@@ -86,12 +86,6 @@ jobs:
           releaseBody: |
             ## What's new
 
-            **Skill store** — browse skills, see their versions, and update them from the store without leaving the app. Skills that are coming later now show a card too.
-
-            **Plans** — the new Go plan and the updated prices are in the plans screen.
-
-            ## Fixes
-
-            - The command-palette shortcut in the sidebar now reads `Ctrl + K` (`⌘ + K` on macOS) instead of running the modifier and the key together.
+            **Usage in Aloe Code** — the composer now shows how much of your 5-hour and weekly allowance you've used, updated after every reply. Hover it to see when each resets, or click it for the full breakdown.
 
           args: ${{ matrix.args }}
