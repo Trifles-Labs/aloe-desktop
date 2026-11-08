@@ -86,6 +86,13 @@ jobs:
           releaseBody: |
             ## What's new
 
-            **Usage in Aloe Code** — the composer now shows how much of your 5-hour and weekly allowance you've used, updated after every reply. Hover it to see when each resets, or click it for the full breakdown.
+            **A better project switcher** — Aloe Code's project picker shows each folder on one line with where it lives, marks the one you're in, and lets you filter and add folders from the same menu.
+
+            **Clearer update notes** — this window now shows release notes properly formatted.
+
+            ## Changes
+
+            - Aloe Code, voice and computer use now pause when you reach your 5-hour limit, and pick up again on their own once it resets.
+            - Folder paths no longer show a stray `\\?\` in front.
 
           args: ${{ matrix.args }}

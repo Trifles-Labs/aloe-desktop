@@ -12,6 +12,8 @@ import Select from "@aloe/ui/components/ui/Select";
 import { EASE_OUT } from "@aloe/ui/lib/motion";
 import { cn, relativeTime } from "@aloe/ui/lib/utils";
 
+import ProjectSwitcher from "./ProjectSwitcher";
+
 export type SidebarSession = { id: string; title: string; createdAt: Date };
 
 type Props = {
@@ -46,22 +48,22 @@ export default function ProjectSidebar({
   return (
     <aside className="liquid-glass-side hidden w-[264px] shrink-0 flex-col px-3 py-4 md:flex">
       <p className="px-1 text-[11px] font-semibold uppercase tracking-wider text-ink-soft/70">Project</p>
-      <div className="mt-1.5 flex items-center gap-1.5">
+      <div className="mt-1.5">
         {hasProjects && project ? (
-          <Select className="min-w-0 flex-1" value={project} options={projectOptions} onChange={onChooseProject} />
+          <ProjectSwitcher projects={projectOptions} value={project} onChange={onChooseProject} onAdd={onAddProject} adding={addingProject} />
         ) : (
-          <p className="min-w-0 flex-1 px-1 text-sm text-ink-soft">No project yet</p>
+          <button
+            type="button"
+            onClick={onAddProject}
+            disabled={addingProject}
+            className="press-tap flex w-full items-center gap-2.5 rounded-xl border border-dashed border-edge px-2.5 py-2 text-left text-sm text-ink-soft transition-colors hover:border-ink-soft/40 hover:text-ink disabled:opacity-60"
+          >
+            <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-sage-soft text-moss">
+              {addingProject ? <Loader2 className="h-4 w-4 animate-spin" /> : <FolderPlus className="h-4 w-4" />}
+            </span>
+            Add a project folder
+          </button>
         )}
-        <button
-          type="button"
-          onClick={onAddProject}
-          disabled={addingProject}
-          aria-label="Add a project folder"
-          title="Add a project folder"
-          className="press-tap flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-edge bg-surface text-ink-soft transition-colors hover:bg-sage-soft hover:text-ink disabled:opacity-60"
-        >
-          {addingProject ? <Loader2 className="h-4 w-4 animate-spin text-moss" /> : <FolderPlus className="h-4 w-4" />}
-        </button>
       </div>
 
       <button

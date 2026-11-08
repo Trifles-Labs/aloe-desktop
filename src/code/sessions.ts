@@ -149,6 +149,22 @@ export function projectName(path: string): string {
   return parts[parts.length - 1] ?? path;
 }
 
+/* A path as a person reads it: without Windows' `\\?\` long-path prefix, and with the
+   user's own folder as `~`. */
+export function displayPath(path: string): string {
+  return path
+    .replace(/^\\\\\?\\(UNC\\)?/, (_, unc: string | undefined) => (unc ? "\\\\" : ""))
+    .replace(/^[A-Za-z]:\\Users\\[^\\]+/i, "~")
+    .replace(/^\/(?:Users|home)\/[^/]+/, "~");
+}
+
+/* Where a project lives, for telling two folders with the same name apart: its parent folder. */
+export function projectParent(path: string): string {
+  const shown = displayPath(path);
+  const cut = Math.max(shown.lastIndexOf("\\"), shown.lastIndexOf("/"));
+  return cut > 0 ? shown.slice(0, cut) : shown;
+}
+
 /* What the model is told on every message of a session, beyond what the backend
    already knows. The coding instructions and the project folder live in the
    backend's fixed Aloe Code system prompt (it gets the path as `projectPath`);

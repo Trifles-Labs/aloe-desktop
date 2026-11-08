@@ -33,6 +33,7 @@ import Workbench from "./Workbench";
 import {
   codeSessionContext,
   codeSessionFor,
+  displayPath,
   forgetCodeSession,
   projectName,
   readLastProject,
@@ -268,7 +269,7 @@ export default function CodeWorkspace({ config, pendingCount, onAddProject }: Pr
       ? `${projectName(activeProject)} is no longer granted to Aloe. Add it again as a project to continue this session.`
       : null;
 
-  const projectOptions = projects.map((folder) => ({ value: folder.path, label: folder.label ?? projectName(folder.path), description: folder.path }));
+  const projectOptions = projects.map((folder) => ({ value: folder.path, label: folder.label ?? projectName(folder.path), description: displayPath(folder.path) }));
 
   const emptyState = (
     <div className="flex w-full flex-col items-center">
