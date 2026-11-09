@@ -34,6 +34,9 @@ import { useDesktopPlatform } from "./platform";
 import { DesktopControlsProvider } from "./settings/DesktopControlsContext";
 import CodeWorkspace from "./code/CodeWorkspace";
 import "./web.css";
+import { disableBrowserContextMenu } from "./lib/context-menu";
+
+disableBrowserContextMenu();
 
 /* Routes the web app answers with a redirect. Without them here, a link to
    Integrations or MCP quietly landed on the chat page — the desktop router

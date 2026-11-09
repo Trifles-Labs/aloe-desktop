@@ -2,6 +2,9 @@ import "@fontsource-variable/geist";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
+import { disableBrowserContextMenu } from "./lib/context-menu";
+
+disableBrowserContextMenu();
 
 /* The desktop-control overlay (overlay.html). No React: two tiny always-on-top windows that only
    toggle one attribute. The Rust side (overlay.rs) owns when they show; this just mirrors it. */

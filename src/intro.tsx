@@ -7,7 +7,10 @@ import { ThemeProvider } from "next-themes";
 
 import { VoiceTour } from "./components/VoiceIntro";
 import type { AgentConfig } from "./types";
+import { disableBrowserContextMenu } from "./lib/context-menu";
 import "./web.css";
+
+disableBrowserContextMenu();
 
 /* The voice tour's own window (open_voice_intro in lib.rs): frameless, transparent and centred on
    the screen, so it floats over whatever is open instead of living inside the main window. The
