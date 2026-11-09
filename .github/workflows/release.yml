@@ -52,11 +52,19 @@ jobs:
             range="${previous}..HEAD"
             heading="## What changed since ${previous}"
           fi
-          # The version-bump commit repeats the release itself, so it is dropped
-          # when other commits describe the release. When it is the only commit,
-          # its own description becomes the note instead of an empty body.
-          body="$(git log "${range}" --no-merges --pretty=format:'- %s' \
-            | grep -v -E '^- Release [0-9]+\.[0-9]+\.[0-9]+' || true)"
+          # A commit belongs in the notes when it changes something a user can
+          # see. CI, version files and the dependency lock are skipped, so a
+          # release whose only change is a workflow or a bump falls back to its
+          # own subject below instead of listing housekeeping.
+          body=""
+          while read -r sha; do
+            [ -n "${sha}" ] || continue
+            subject="$(git log -1 --pretty=format:'%s' "${sha}")"
+            if git show --name-only --pretty=format: "${sha}" | grep -v '^$' \
+              | grep -qvE '^(\.github/|package\.json$|bun\.lock$|src-tauri/Cargo\.(toml|lock)$|src-tauri/tauri\.conf\.json$)'; then
+              body="${body}- ${subject}"$'\n'
+            fi
+          done <<< "$(git rev-list --no-merges "${range}")"
           if [ -z "${body}" ]; then
             subject="$(git log "${range}" --no-merges -n 1 --pretty=format:'%s')"
             if [ -n "${subject}" ]; then
