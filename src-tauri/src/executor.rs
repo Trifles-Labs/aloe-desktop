@@ -538,6 +538,9 @@ async fn run_tool(
         "list_terminal_sessions" => list_terminal_sessions(state).await,
         "wait_terminal_session"  => wait_terminal_session(state, job.input.clone()).await,
         "open_local_url"         => open_local_url(&job.input).await,
+        // Media keys and Spotify links (media.rs): quicker than driving the screen.
+        "press_media_key"        => crate::media::press_media_key(&job.input).await,
+        "open_spotify"           => crate::media::open_spotify(&job.input).await,
         // The native folder picker, titled with Aloe's reason; the user's pick becomes a grant.
         "request_folder_access"  => crate::folder_access::request_folder_access(app, &job.input).await,
         "capture_desktop_screenshot" => capture_desktop_screenshot(app).await,

@@ -20,6 +20,7 @@ mod screen_ocr;
 mod scratchpad;
 mod search;
 mod local_skills;
+mod media;
 mod shared_files;
 mod shell;
 mod skills;
