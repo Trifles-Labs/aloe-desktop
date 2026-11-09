@@ -84,15 +84,8 @@ jobs:
           # "Update ready" modal reads out of latest.json. Keep it to what a person
           # using the app would notice.
           releaseBody: |
-            ## What's new
+            ## Fixes
 
-            **A better project switcher** — Aloe Code's project picker shows each folder on one line with where it lives, marks the one you're in, and lets you filter and add folders from the same menu.
-
-            **Clearer update notes** — this window now shows release notes properly formatted.
-
-            ## Changes
-
-            - Aloe Code, voice and computer use now pause when you reach your 5-hour limit, and pick up again on their own once it resets.
-            - Folder paths no longer show a stray `\\?\` in front.
+            - The command-palette hint in the sidebar now stays on one line — `Ctrl + K` on Windows and Linux, `⌘ + K` on macOS. It used to split into `CTRL +` / `K` and push "Search conversations" onto two lines; the row is single-line again, with the full label on hover.
 
           args: ${{ matrix.args }}
