@@ -6,5 +6,8 @@
 <dict>
     <key>NSMicrophoneUsageDescription</key>
     <string>Aloe listens when you press the mic so you can talk to it instead of typing.</string>
+    <!-- macOS asks before an app sends Apple Events; media.rs uses them to start a song in Spotify. -->
+    <key>NSAppleEventsUsageDescription</key>
+    <string>Aloe asks Spotify to play the song you asked for.</string>
 </dict>
 </plist>
