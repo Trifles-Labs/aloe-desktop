@@ -233,6 +233,8 @@ const render = (view: View) => {
   root.dataset.phase = view.phase;
   if (view.phase === "listening") resetReading();
   if (view.phase === "idle") {
+    const typed = document.getElementById("type") as HTMLInputElement | null;
+    if (typed) typed.value = "";
     // Keep the old text while the island rises away.
     delete root.dataset.open;
     report(null);
@@ -501,6 +503,33 @@ void invoke<View>("voice_overlay_state").then(render, () => undefined);
 
 $("close").addEventListener("click", () => {
   void invoke("voice_stop").catch(() => undefined);
+});
+
+/* A typed message joins the same turn as something said, and the reply is spoken back here. */
+const composer = $("composer") as HTMLFormElement;
+const field = $("type") as HTMLInputElement;
+let sending = false;
+field.addEventListener("pointerdown", (event) => {
+  if (document.activeElement === field) return;
+  event.preventDefault();
+  void invoke("voice_compose").then(() => field.focus(), () => field.focus());
+});
+field.addEventListener("focus", () => {
+  void invoke("voice_compose").catch(() => undefined);
+});
+field.addEventListener("blur", () => {
+  if (sending || field.value.trim()) return;
+  void invoke("voice_compose_end").catch(() => undefined);
+});
+composer.addEventListener("submit", (event) => {
+  event.preventDefault();
+  const text = field.value.trim();
+  if (!text) return;
+  sending = true;
+  field.value = "";
+  field.blur();
+  sending = false;
+  void invoke("voice_type", { text }).catch(() => undefined);
 });
 $("stop").addEventListener("click", () => {
   void invoke("stop_desktop_control").catch(() => undefined);

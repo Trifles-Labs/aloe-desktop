@@ -71,6 +71,16 @@ mod win {
         Ok(words)
     }
 
+    /// Words on the 0–1000 grid for a PNG of known pixel size. The same reader as the live screen.
+    #[cfg(test)]
+    pub fn ocr_png(png: &[u8], width: u32, height: u32) -> Result<Vec<(String, f64, f64, f64, f64)>, String> {
+        let recognized = recognize(png)?;
+        Ok(recognized
+            .into_iter()
+            .map(|(text, x, y, w, h)| (text, to_grid(x as f64, width), to_grid(y as f64, height), to_grid(w as f64, width), to_grid(h as f64, height)))
+            .collect())
+    }
+
     pub fn read() -> Result<Value, String> {
         let monitors = Monitor::all().map_err(|e| format!("Could not list displays: {e}"))?;
         let monitor = monitors
@@ -136,4 +146,80 @@ pub async fn read_screen_text(app: &AppHandle, _input: &Value) -> Result<Value, 
 #[cfg(not(windows))]
 pub async fn read_screen_text(_app: &AppHandle, _input: &Value) -> Result<Value, String> {
     Err("Reading the screen's text is only available on Windows.".to_string())
+}
+
+/// The live screen reader, pointed at a PNG instead of the display. Tests use this.
+#[cfg(all(test, windows))]
+pub fn ocr_png(png: &[u8], width: u32, height: u32) -> Result<Vec<(String, f64, f64, f64, f64)>, String> {
+    win::ocr_png(png, width, height)
+}
+
+#[cfg(all(test, windows))]
+mod accuracy {
+    use super::ocr_png;
+
+    const W: u32 = 1280;
+    const H: u32 = 720;
+
+    fn loose(value: &str) -> String {
+        value.to_lowercase().chars().filter(|c| !c.is_whitespace()).collect()
+    }
+
+    fn iou(a: (f64, f64, f64, f64), b: (f64, f64, f64, f64)) -> f64 {
+        let (ax, ay, aw, ah) = a;
+        let (bx, by, bw, bh) = b;
+        let x0 = ax.max(bx);
+        let y0 = ay.max(by);
+        let x1 = (ax + aw).min(bx + bw);
+        let y1 = (ay + ah).min(by + bh);
+        let inter = (x1 - x0).max(0.0) * (y1 - y0).max(0.0);
+        let union = aw * ah + bw * bh - inter;
+        if union <= 0.0 { 0.0 } else { inter / union }
+    }
+
+    /// A quote Aloe would draw, scored against the rectangle the fixture was painted at.
+    #[test]
+    fn complex_worksheet_quotes_land_on_the_painted_text() {
+        let png = include_bytes!("../tests/fixtures/worksheet.png");
+        let words = ocr_png(png, W, H).expect("Windows OCR");
+        let heard: Vec<String> = words.iter().map(|(text, ..)| text.clone()).collect();
+        assert!(words.len() >= 12, "OCR only saw {heard:?}");
+
+        let page = [
+            ("Work by the field", 70.0, 60.0, 304.5, 54.3),
+            ("the length of the rod", 70.0, 150.0, 231.6, 102.3),
+            ("A. 12 cm", 70.0, 290.0, 124.9, 42.7),
+            ("B. 20 cm", 70.0, 340.0, 122.7, 42.7),
+            ("C. 7 cm", 70.0, 390.0, 107.8, 42.7),
+            ("D. The length of the rod", 70.0, 450.0, 188.1, 84.7),
+        ];
+        for (phrase, x, y, w, h) in page {
+            let truth = (x / W as f64 * 1000.0, y / H as f64 * 1000.0, w / W as f64 * 1000.0, h / H as f64 * 1000.0);
+            let hits: Vec<_> = words
+                .iter()
+                .filter(|(_, wx, wy, ww, wh)| {
+                    let word = (*wx, *wy, *ww, *wh);
+                    let x0 = wx.max(truth.0);
+                    let y0 = wy.max(truth.1);
+                    let x1 = (*wx + *ww).min(truth.0 + truth.2);
+                    let y1 = (*wy + *wh).min(truth.1 + truth.3);
+                    let inter = (x1 - x0).max(0.0) * (y1 - y0).max(0.0);
+                    let area = (*ww * *wh).max(1.0);
+                    inter / area > 0.4 && iou(word, truth) > 0.0
+                })
+                .collect();
+            let joined: String = hits.iter().map(|(text, ..)| loose(text)).collect();
+            assert!(joined.contains(&loose(phrase)), "quote {phrase:?} heard {joined:?} from {heard:?}");
+            let (mut x0, mut y0, mut x1, mut y1) = (1000.0_f64, 1000.0_f64, 0.0_f64, 0.0_f64);
+            for (_, wx, wy, ww, wh) in &hits {
+                x0 = x0.min(*wx);
+                y0 = y0.min(*wy);
+                x1 = x1.max(*wx + *ww);
+                y1 = y1.max(*wy + *wh);
+            }
+            let found = (x0, y0, x1 - x0, y1 - y0);
+            let score = iou(found, truth);
+            assert!(score > 0.35, "quote {phrase:?} IoU {score:.2} box {found:?} truth {truth:?}");
+        }
+    }
 }

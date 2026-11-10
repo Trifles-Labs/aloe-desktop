@@ -33,6 +33,7 @@ import { errorMessage, GOOGLE_AUTH_EVENT, startGoogleAuth } from "./lib/desktop"
 import { useDesktopPlatform } from "./platform";
 import { DesktopControlsProvider } from "./settings/DesktopControlsContext";
 import CodeWorkspace from "./code/CodeWorkspace";
+import { FiguresCanvas } from "./components/FiguresCanvas";
 import "./web.css";
 
 /* Routes the web app answers with a redirect. Without them here, a link to
@@ -101,6 +102,7 @@ function App() {
   const dismissUpdate = useCallback(() => setLaterVersion(update?.version ?? null), [update?.version]);
 
   const authenticated = Boolean(config.agentId && config.credential && config.userToken);
+  const figuresCanvas = usePathname() === "/figures";
 
   /* The deep-link listener lives for the whole window lifetime; this ref lets it
      ignore a token that arrives after the app is already signed in (e.g. a stale
@@ -341,6 +343,20 @@ function App() {
   // ── Render ──────────────────────────────────────────────────────────────────
 
   const toastLayer = <ToastContainer toasts={toasts} onDismiss={dismiss} onPause={pause} onResume={resume} />;
+
+  if (figuresCanvas) {
+    return (
+      <div className="flex h-screen flex-col overflow-hidden">
+        <DesktopTitleBar />
+        <ThemeProvider attribute="class" defaultTheme="system" enableSystem themes={["light", "dark", "true-dark"]} disableTransitionOnChange>
+          <main className="relative min-h-0 flex-1 overflow-y-auto bg-canvas">
+            <FiguresCanvas />
+          </main>
+        </ThemeProvider>
+        {toastLayer}
+      </div>
+    );
+  }
 
   if (authenticated) {
     return (

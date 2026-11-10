@@ -3,7 +3,8 @@
 //! 1. hotkey.rs watches Left Ctrl + Left Alt. Hold it to talk, or tap it to talk hands-free:
 //!    then listening ends by itself when you stop speaking (audio.rs `Endpointer`). The microphone
 //!    opens at once and realtime.rs streams it to OpenAI's live transcriber through a short-lived
-//!    key from the backend. The overlay glows and shows the words as they are heard.
+//!    key from the backend. The overlay glows and shows the words as they are heard. The same
+//!    island takes a typed message: it joins this conversation and is spoken back like anything said.
 //! 2. What was said goes to Aloe as a chat turn from this device, in one standing conversation, so
 //!    it has the same local tools as a chat typed here. The screen as it was when listening began
 //!    is attached to that turn, so Aloe can see whatever the person is talking about. A few short
@@ -76,6 +77,12 @@ enum Command {
     ListenNow(u64),
     /// The reply ended by asking something: listen for the reply hands-free.
     FollowUp(u64),
+    /// The island's text field has focus, so a recording in progress must not also send.
+    Compose,
+    /// Focus left that field without a message.
+    ComposeEnd,
+    /// A message typed into the island, sent like something said.
+    Typed(String),
 }
 
 static COMMANDS: OnceLock<UnboundedSender<Command>> = OnceLock::new();
@@ -86,6 +93,8 @@ static LISTEN_ID: AtomicU64 = AtomicU64::new(0);
 static PROMPTS: Mutex<Option<(u64, UnboundedSender<Prompt>)>> = Mutex::new(None);
 /// The last reply's sentences, for "say that again".
 static LAST_REPLY: Mutex<Vec<String>> = Mutex::new(Vec::new());
+/// The text field has focus. A finished overlay must not fade out from under it.
+static COMPOSING: AtomicBool = AtomicBool::new(false);
 /// How long a finished sentence waits before it is spoken, in case a tool call follows it.
 const SPEECH_HOLD: Duration = Duration::from_millis(350);
 /// Said once when a tool starts before Aloe has said anything.
@@ -112,6 +121,22 @@ pub fn start(app: &AppHandle) {
 /// Ends whatever voice is doing and hides the overlay.
 pub fn dismiss() {
     send(Command::Dismiss);
+}
+
+/// The island's text field took focus. A listen in progress is dropped so it cannot send as well.
+pub fn compose() {
+    send(Command::Compose);
+}
+
+/// Focus left the field with nothing to send.
+pub fn compose_end() {
+    send(Command::ComposeEnd);
+}
+
+/// A message typed into the island. Spoken back on the same path as a voice turn.
+pub fn type_message(text: String) {
+    overlay::restore_foreground();
+    send(Command::Typed(text));
 }
 
 fn send(command: Command) {
@@ -168,6 +193,8 @@ struct Session {
     replying: Option<Replying>,
     /// A prompt is being read out and the next thing said answers it.
     expecting: Option<(u64, oneshot::Sender<String>)>,
+    /// Screenshot taken when listening began, parked while the user types instead.
+    held_screen: Option<JoinHandle<Option<Vec<u8>>>>,
 }
 
 fn voice_on(app: &AppHandle) -> bool {
@@ -282,6 +309,80 @@ async fn handle(app: &AppHandle, speaker: &Speaker, session: &mut Session, comma
                     session.listening = listen(&app, speaker, generation, Purpose::Chat { follow_up: true }, true).await;
                 }
             }
+            Command::Compose => {
+                COMPOSING.store(true, Ordering::SeqCst);
+                if let Some(listening) = session.listening.take() {
+                    let generation = listening.generation;
+                    let (purpose, screen) = release_mic(listening);
+                    match purpose {
+                        Purpose::Answer(answer) => {
+                            if let Some(screen) = screen {
+                                screen.abort();
+                            }
+                            session.expecting = Some((generation, answer));
+                        }
+                        Purpose::Chat { .. } => {
+                            park_screen(session, screen);
+                            overlay::level(&app, 0.0);
+                            update(&app, generation, |view| {
+                                view.phase = Phase::Done;
+                                view.status = None;
+                            });
+                        }
+                    }
+                }
+            }
+            Command::ComposeEnd => {
+                COMPOSING.store(false, Ordering::SeqCst);
+                let phase = overlay::current().phase;
+                if session.replying.is_none() && session.listening.is_none() && matches!(phase, Phase::Done | Phase::Error) {
+                    linger(&app, GENERATION.load(Ordering::SeqCst));
+                }
+            }
+            Command::Typed(text) => {
+                let text = text.trim().to_string();
+                if text.is_empty() {
+                    return;
+                }
+                COMPOSING.store(false, Ordering::SeqCst);
+                let _ = place_overlay(&app).await;
+                if let Some((generation, answer)) = session.expecting.take() {
+                    update(&app, generation, |view| {
+                        view.phase = Phase::Thinking;
+                        view.transcript = text.clone();
+                        view.prompt = None;
+                        view.status = None;
+                    });
+                    let _ = answer.send(text);
+                } else if let Some(listening) = session.listening.take() {
+                    let generation = listening.generation;
+                    let backend = listening.backend.clone();
+                    let (purpose, screen) = release_mic(listening);
+                    overlay::level(&app, 0.0);
+                    match purpose {
+                        Purpose::Answer(answer) => {
+                            if let Some(screen) = screen {
+                                screen.abort();
+                            }
+                            update(&app, generation, |view| {
+                                view.phase = Phase::Thinking;
+                                view.transcript = text.clone();
+                                view.prompt = None;
+                                view.status = None;
+                            });
+                            let _ = answer.send(text);
+                        }
+                        Purpose::Chat { .. } => deliver_text(&app, speaker, session, generation, backend, text, screen),
+                    }
+                } else if let Some(backend) = backend_for(&app) {
+                    let generation = new_generation(session, speaker);
+                    let screen = session.held_screen.take();
+                    deliver_text(&app, speaker, session, generation, backend, text, screen);
+                } else {
+                    let generation = new_generation(session, speaker);
+                    fail(&app, speaker, generation, "Sign in to Aloe Desktop to talk to Aloe.".to_string());
+                }
+            }
             Command::Hotkey(HotkeyEvent::Escape) => {
                 // The first Esc closes the answer; with nothing else up, Esc clears the marks.
                 if overlay::current().phase != Phase::Idle || speaker.is_busy() {
@@ -298,6 +399,8 @@ async fn handle(app: &AppHandle, speaker: &Speaker, session: &mut Session, comma
 /// Closes the answer and stops Aloe talking. Marks stay: only the user takes them away (Esc with
 /// nothing else up, or the Clear marks chip), or Aloe replaces or clears them.
 fn dismiss_all(app: &AppHandle, speaker: &Speaker, session: &mut Session) {
+    COMPOSING.store(false, Ordering::SeqCst);
+    overlay::restore_foreground();
     new_generation(session, speaker);
     overlay::show(app, View::default());
 }
@@ -308,6 +411,9 @@ fn new_generation(session: &mut Session, speaker: &Speaker) -> u64 {
     speaker.mute();
     // Dropping the sender ends a prompt waiting for an answer, which then declines it.
     session.expecting = None;
+    if let Some(screen) = session.held_screen.take() {
+        screen.abort();
+    }
     if let Some(listening) = session.listening.take() {
         discard(listening);
     }
@@ -392,8 +498,53 @@ fn linger(app: &AppHandle, generation: u64) {
     let app = app.clone();
     tauri::async_runtime::spawn(async move {
         tokio::time::sleep(Duration::from_secs(seconds)).await;
+        if COMPOSING.load(Ordering::SeqCst) {
+            return;
+        }
         update(&app, generation, |view| *view = View::default());
     });
+}
+
+/// Stops the microphone and the transcriber. The screenshot handle is handed back uncancelled.
+fn release_mic(listening: Listening) -> (Purpose, Option<JoinHandle<Option<Vec<u8>>>>) {
+    listening.transcribe.abort();
+    listening.meter.abort();
+    listening.capture.stop();
+    (listening.purpose, listening.screen)
+}
+
+fn park_screen(session: &mut Session, screen: Option<JoinHandle<Option<Vec<u8>>>>) {
+    if let Some(old) = session.held_screen.take() {
+        old.abort();
+    }
+    session.held_screen = screen;
+}
+
+/// Sends words typed into the island down the same path as a finished recording.
+fn deliver_text(app: &AppHandle, speaker: &Speaker, session: &mut Session, generation: u64, backend: Backend, said: String, screen: Option<JoinHandle<Option<Vec<u8>>>>) {
+    if let Some(command) = local_command(&said) {
+        if let Some(screen) = screen {
+            screen.abort();
+        }
+        return run_local_command(app, speaker, generation, command);
+    }
+    update(app, generation, |view| {
+        *view = View { phase: Phase::Thinking, transcript: said.clone(), ..View::default() };
+    });
+    speaker.tone(Earcon::Thinking);
+    let screen = screen.or_else(|| {
+        let app = app.clone();
+        Some(tauri::async_runtime::spawn(async move { capture_screen(&app).await }))
+    });
+    let finished = Arc::new(AtomicBool::new(false));
+    let conversation = Arc::new(Mutex::new(None));
+    let task = {
+        let (app, speaker, backend, finished, conversation) = (app.clone(), speaker.clone(), backend.clone(), finished.clone(), conversation.clone());
+        tauri::async_runtime::spawn(async move {
+            send_said(&app, &speaker, generation, &backend, &conversation, &finished, said, screen).await;
+        })
+    };
+    session.replying = Some(Replying { task, finished, backend, conversation });
 }
 
 fn backend_for(app: &AppHandle) -> Option<Backend> {
@@ -577,54 +728,68 @@ fn finish(app: &AppHandle, speaker: &Speaker, session: &mut Session, listening: 
                         }
                         return fail(&app, &speaker, generation, "I didn't catch that. Please try again.".to_string());
                     }
-                    if let Some(command) = local_command(&said) {
-                        return run_local_command(&app, &speaker, generation, command);
-                    }
-                    let conversation_id = match voice_conversation(&app) {
-                        Ok(id) => id,
-                        Err(error) => return fail(&app, &speaker, generation, error),
-                    };
-                    *conversation.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some(conversation_id.clone());
-                    update(&app, generation, |view| {
-                        view.phase = Phase::Thinking;
-                        view.transcript = said.clone();
-                    });
-                    let attachment_ids = match screen_bytes(screen).await {
-                        Some(bytes) => match tokio::time::timeout(Duration::from_secs(5), backend.upload_attachment(bytes, "screen.jpg", "image/jpeg")).await {
-                            Ok(Ok(id)) => vec![id],
-                            Ok(Err(error)) => {
-                                debug_log("voice", "screenshot_upload", error);
-                                Vec::new()
-                            }
-                            Err(_) => {
-                                debug_log("voice", "screenshot_upload", "timed out");
-                                Vec::new()
-                            }
-                        },
-                        None => Vec::new(),
-                    };
-                    latency::mark("screenshot_ready");
-                    match reply(&app, &speaker, generation, &backend, &conversation_id, &said, &attachment_ids, &finished).await {
-                        Ok(asked) => {
-                            update(&app, generation, |view| {
-                                view.phase = Phase::Done;
-                                view.status = None;
-                                view.prompt = None;
-                            });
-                            if asked && prefs(&app).follow_ups {
-                                send(Command::FollowUp(generation));
-                            } else {
-                                linger(&app, generation);
-                            }
-                        }
-                        Err(error) => {
-                            finished.store(true, Ordering::SeqCst);
-                            fail(&app, &speaker, generation, error);
-                        }
-                    }
+                    send_said(&app, &speaker, generation, &backend, &conversation, &finished, said, screen).await;
                 })
             };
             session.replying = Some(Replying { task, finished, backend, conversation });
+        }
+    }
+}
+
+/// One message, spoken or typed, after the words are known.
+async fn send_said(
+    app: &AppHandle,
+    speaker: &Speaker,
+    generation: u64,
+    backend: &Backend,
+    conversation: &Mutex<Option<String>>,
+    finished: &Arc<AtomicBool>,
+    said: String,
+    screen: Option<JoinHandle<Option<Vec<u8>>>>,
+) {
+    if let Some(command) = local_command(&said) {
+        return run_local_command(app, speaker, generation, command);
+    }
+    let conversation_id = match voice_conversation(app) {
+        Ok(id) => id,
+        Err(error) => return fail(app, speaker, generation, error),
+    };
+    *conversation.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some(conversation_id.clone());
+    update(app, generation, |view| {
+        view.phase = Phase::Thinking;
+        view.transcript = said.clone();
+    });
+    let attachment_ids = match screen_bytes(screen).await {
+        Some(bytes) => match tokio::time::timeout(Duration::from_secs(5), backend.upload_attachment(bytes, "screen.jpg", "image/jpeg")).await {
+            Ok(Ok(id)) => vec![id],
+            Ok(Err(error)) => {
+                debug_log("voice", "screenshot_upload", error);
+                Vec::new()
+            }
+            Err(_) => {
+                debug_log("voice", "screenshot_upload", "timed out");
+                Vec::new()
+            }
+        },
+        None => Vec::new(),
+    };
+    latency::mark("screenshot_ready");
+    match reply(app, speaker, generation, backend, &conversation_id, &said, &attachment_ids, finished).await {
+        Ok(asked) => {
+            update(app, generation, |view| {
+                view.phase = Phase::Done;
+                view.status = None;
+                view.prompt = None;
+            });
+            if asked && prefs(app).follow_ups {
+                send(Command::FollowUp(generation));
+            } else {
+                linger(app, generation);
+            }
+        }
+        Err(error) => {
+            finished.store(true, Ordering::SeqCst);
+            fail(app, speaker, generation, error);
         }
     }
 }

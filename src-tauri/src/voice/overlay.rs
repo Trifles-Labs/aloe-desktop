@@ -5,7 +5,8 @@
 //!
 //! The same rules as the desktop-control overlay (overlay.rs) apply, for the same reasons: created
 //! unfocused and never `show()`n again (that would activate it on Windows and steal the keyboard
-//! from the app the user is talking over), faded in and out by the page, and fed by `eval` rather
+//! from the app the user is talking over). The text field is the exception: focusing it takes the
+//! keyboard, and sending the message gives it back. Faded in and out by the page, and fed by `eval` rather
 //! than app events. Unlike that pill it shows on screen shares and screenshots, so marks can be
 //! shown to others; only Aloe's own screenshots leave it out (`own_capture`).
 //!
@@ -15,7 +16,7 @@
 //! small chip to clear them that is clickable the same way, and they keep the watcher running
 //! after the island has gone.
 
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicIsize, Ordering};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
@@ -101,6 +102,40 @@ static CHIP: Mutex<Option<Rect>> = Mutex::new(None);
 /// Cleared while Aloe itself clicks, so a synthetic click at the top of the screen reaches the
 /// app beneath rather than the island.
 static CLICKABLE: AtomicBool = AtomicBool::new(true);
+/// The window that had the keyboard before the text field took it. 0 when there is nothing to restore.
+static RETURN_TO: AtomicIsize = AtomicIsize::new(0);
+/// Whoever was in front when the pointer entered the island, before a click could activate this window.
+static HOVERED_OVER: AtomicIsize = AtomicIsize::new(0);
+
+/// The text field needs keys. Remember who had them, then activate this window.
+pub fn focus_stage(app: &AppHandle) {
+    let Some(window) = app.get_webview_window(STAGE_LABEL) else { return };
+    #[cfg(windows)]
+    unsafe {
+        if RETURN_TO.load(Ordering::SeqCst) == 0 {
+            let hovered = HOVERED_OVER.load(Ordering::SeqCst);
+            let current = windows_sys::Win32::UI::WindowsAndMessaging::GetForegroundWindow();
+            let ours = window.hwnd().ok().map(|hwnd| hwnd.0 as isize).unwrap_or(0);
+            let previous = if hovered != 0 && hovered != ours { hovered } else { current as isize };
+            if previous != 0 && previous != ours {
+                RETURN_TO.store(previous, Ordering::SeqCst);
+            }
+        }
+    }
+    let _ = window.set_focus();
+}
+
+/// Hands the keyboard back to the app that had it before the text field.
+pub fn restore_foreground() {
+    #[cfg(windows)]
+    unsafe {
+        let hwnd = RETURN_TO.swap(0, Ordering::SeqCst);
+        HOVERED_OVER.store(0, Ordering::SeqCst);
+        if hwnd != 0 {
+            windows_sys::Win32::UI::WindowsAndMessaging::SetForegroundWindow(hwnd as *mut std::ffi::c_void);
+        }
+    }
+}
 
 /// The overlay is up: overlay.rs then leaves the desktop-control status to the island.
 pub fn is_showing() -> bool {
@@ -234,6 +269,15 @@ fn watch_pointer(app: AppHandle) {
                 _ => false,
             };
             let take = over && CLICKABLE.load(Ordering::SeqCst);
+            #[cfg(windows)]
+            if take && !taking {
+                unsafe {
+                    let current = windows_sys::Win32::UI::WindowsAndMessaging::GetForegroundWindow();
+                    if !current.is_null() {
+                        HOVERED_OVER.store(current as isize, Ordering::SeqCst);
+                    }
+                }
+            }
             if take != taking {
                 if let Some(window) = app.get_webview_window(STAGE_LABEL) {
                     if window.set_ignore_cursor_events(!take).is_ok() {

@@ -417,6 +417,25 @@ fn voice_stop() {
     voice::dismiss();
 }
 
+/// The island's text field took focus, so a recording does not also send.
+#[tauri::command]
+fn voice_compose(app: tauri::AppHandle) {
+    voice::overlay::focus_stage(&app);
+    voice::compose();
+}
+
+/// Focus left the field with nothing typed.
+#[tauri::command]
+fn voice_compose_end() {
+    voice::compose_end();
+}
+
+/// A message typed into the voice island.
+#[tauri::command]
+fn voice_type(text: String) {
+    voice::type_message(text);
+}
+
 /// Where the voice overlay's island is, so only it takes the cursor.
 #[tauri::command]
 fn voice_overlay_island(rect: Option<voice::overlay::Rect>) {
@@ -778,6 +797,9 @@ pub fn run() {
             set_voice_enabled,
             set_voice_prefs,
             voice_stop,
+            voice_compose,
+            voice_compose_end,
+            voice_type,
             voice_overlay_state,
             voice_overlay_island,
             voice_overlay_chip,

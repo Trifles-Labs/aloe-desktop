@@ -1,7 +1,7 @@
 import katex from "katex";
 import "katex/dist/katex.min.css";
-import "@fontsource/caveat/500.css";
-import "@fontsource/caveat/700.css";
+import "@fontsource/shantell-sans/500.css";
+import "@fontsource/shantell-sans/700.css";
 
 /* Aloe's handwriting over the screen (a draw_on_screen "write" mark, drawn by voice-drawing.ts).
    A small Markdown subset, one line per line: # headings, **bold**, *italic*, `code`, - and 1.
