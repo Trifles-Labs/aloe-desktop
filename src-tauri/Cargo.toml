@@ -48,14 +48,18 @@ xcap = "0.0.12"
 image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }
 # Push-to-talk voice (voice/): microphone capture and playback of Aloe's spoken reply.
 cpal = "0.18"
+# The clipboard, as text only: the desk snapshot a spoken turn sends, and "paste that here" (desk.rs).
+arboard = { version = "3", default-features = false }
 
 # The green pointer while Aloe is in control (cursor.rs): swaps the system cursor on Windows.
 # Also the push-to-talk keyboard hook (voice/hotkey.rs).
 [target.'cfg(windows)'.dependencies]
-windows-sys = { version = "0.59", features = ["Win32_Foundation", "Win32_Graphics_Gdi", "Win32_UI_WindowsAndMessaging", "Win32_UI_Input_KeyboardAndMouse", "Win32_System_LibraryLoader", "Win32_System_Threading"] }
+# Dwm, Power, Shutdown: which windows are really on screen, the battery, lock and sleep (desk.rs, quick_actions.rs).
+windows-sys = { version = "0.59", features = ["Win32_Foundation", "Win32_Graphics_Gdi", "Win32_Graphics_Dwm", "Win32_UI_WindowsAndMessaging", "Win32_UI_Input_KeyboardAndMouse", "Win32_System_LibraryLoader", "Win32_System_Threading", "Win32_System_Power", "Win32_System_Shutdown"] }
 # Screen text for placing marks (screen_ocr.rs). Windows.Media.Ocr, not a vision model.
 # Media_Control: what Spotify is playing, to confirm a song started (media.rs).
-windows = { version = "0.58", features = ["Foundation", "Foundation_Collections", "Globalization", "Graphics_Imaging", "Media_Control", "Media_Ocr", "Storage_Streams", "Win32_System_Com"] }
+# Media_Audio: the speakers' volume. UI_Accessibility: the selected text, read as a screen reader would (desk.rs).
+windows = { version = "0.58", features = ["Foundation", "Foundation_Collections", "Globalization", "Graphics_Imaging", "Media_Control", "Media_Ocr", "Storage_Streams", "Win32_Foundation", "Win32_System_Com", "Win32_Media_Audio", "Win32_Media_Audio_Endpoints", "Win32_UI_Accessibility"] }
 
 # Reduced debug info to keep dev-build artifacts smaller (this machine runs low on disk
 # during iterative `tauri dev` rebuilds).

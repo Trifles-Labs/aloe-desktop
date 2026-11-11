@@ -105,6 +105,10 @@ pub struct VoicePrefs {
     pub high_contrast: bool,
     /// "short" (6s), "long" (20s) or "until_dismissed".
     pub linger: String,
+    /// Send the text selected when talking starts along with what was said (desk.rs).
+    pub share_selection: bool,
+    /// Send what is on the clipboard too. Off unless the user turns it on: passwords get copied.
+    pub share_clipboard: bool,
 }
 
 impl Default for VoicePrefs {
@@ -119,6 +123,8 @@ impl Default for VoicePrefs {
             text_size: "l".to_string(),
             high_contrast: false,
             linger: "long".to_string(),
+            share_selection: true,
+            share_clipboard: false,
         }
     }
 }

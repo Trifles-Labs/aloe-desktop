@@ -541,6 +541,10 @@ async fn run_tool(
         // Media keys and Spotify links (media.rs): quicker than driving the screen.
         "press_media_key"        => crate::media::press_media_key(&job.input).await,
         "open_spotify"           => crate::media::open_spotify(&job.input).await,
+        // One-step app, system and typing actions (quick_actions.rs), each with its own gate.
+        "quick_app"              => crate::quick_actions::quick_app(app, &job.input).await,
+        "system_control"         => crate::quick_actions::system_control(app, &job.input).await,
+        "quick_type"             => crate::quick_actions::quick_type(app, &job.input).await,
         // The native folder picker, titled with Aloe's reason; the user's pick becomes a grant.
         "request_folder_access"  => crate::folder_access::request_folder_access(app, &job.input).await,
         "capture_desktop_screenshot" => capture_desktop_screenshot(app).await,

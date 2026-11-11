@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { Contrast, Gauge, Hand, MessageCircleQuestion, Mic, PlayCircle, ShieldAlert, Timer, Type, Volume2, Waves } from "lucide-react";
+import { ClipboardList, Contrast, Gauge, Hand, MessageCircleQuestion, Mic, PlayCircle, ShieldAlert, TextSelect, Timer, Type, Volume2, Waves } from "lucide-react";
 import { REPLAY_VOICE_INTRO } from "./VoiceIntro";
 
 import Switch from "@aloe/ui/components/ui/Switch";
@@ -107,6 +107,18 @@ export function VoicePanel({ config, setConfig }: Props) {
         title="Answer without a key"
         detail="When Aloe asks you something, it listens for your answer straight away."
         control={<Switch checked={prefs.followUps} disabled={off} label="Answer without a key" onChange={(on) => setPref("followUps", on)} />}
+      />
+      <ControlRow
+        icon={TextSelect}
+        title="Share selected text"
+        detail="Whatever you have highlighted when you start talking goes to Aloe with your words, so “explain this” just works. It is kept with the voice conversation."
+        control={<Switch checked={prefs.shareSelection} disabled={off} label="Share selected text" onChange={(on) => setPref("shareSelection", on)} />}
+      />
+      <ControlRow
+        icon={ClipboardList}
+        title="Share the clipboard"
+        detail="Sends the text you last copied with everything you say. Leave it off if you copy passwords."
+        control={<Switch checked={prefs.shareClipboard} disabled={off} label="Share the clipboard" onChange={(on) => setPref("shareClipboard", on)} />}
       />
       <ControlRow
         icon={Volume2}

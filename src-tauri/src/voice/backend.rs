@@ -106,11 +106,16 @@ impl Backend {
         body.get("id").and_then(Value::as_str).map(str::to_string).ok_or_else(|| "Couldn't attach the screenshot: no id in the reply.".to_string())
     }
 
-    /// Sends a chat turn. The caller reads the event stream off the response.
-    pub async fn chat(&self, conversation_id: &str, message: &str, attachment_ids: &[String]) -> Result<Response, String> {
+    /// Sends a chat turn. The caller reads the event stream off the response. `desk` is the
+    /// snapshot of the computer taken when listening began (desk.rs); a backend that doesn't know
+    /// it yet ignores it.
+    pub async fn chat(&self, conversation_id: &str, message: &str, attachment_ids: &[String], desk: Option<&Value>) -> Result<Response, String> {
         let mut body = json!({ "message": message, "conversationId": conversation_id, "origin": "desktop_voice" });
         if !attachment_ids.is_empty() {
             body["attachmentIds"] = json!(attachment_ids);
+        }
+        if let Some(desk) = desk.filter(|desk| desk.as_object().is_some_and(|fields| !fields.is_empty())) {
+            body["deviceContext"] = desk.clone();
         }
         let response = self
             .post("/api/chat")

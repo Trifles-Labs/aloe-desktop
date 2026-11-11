@@ -59,7 +59,7 @@ use audio::{Capture, Earcon, Ended};
 use backend::Backend;
 use hotkey::HotkeyEvent;
 use overlay::{Phase, PromptView, View};
-use prompts::{local_command, Answer, LocalCommand, Prompt};
+use prompts::{local_command, Answer, LocalCommand, MediaCommand, Prompt};
 use speaker::Speaker;
 use speech::SpeechStream;
 
@@ -89,8 +89,14 @@ static PROMPTS: Mutex<Option<(u64, UnboundedSender<Prompt>)>> = Mutex::new(None)
 static LAST_REPLY: Mutex<Vec<String>> = Mutex::new(Vec::new());
 /// How long a finished sentence waits before it is spoken, in case a tool call follows it.
 const SPEECH_HOLD: Duration = Duration::from_millis(350);
-/// Said once when a tool starts before Aloe has said anything.
-const TOOL_FILLER: &str = "One moment.";
+/// Said once when a tool starts before Aloe has said anything. A few of them, in turn: the same
+/// two words before every task is what makes a voice sound like a machine.
+const TOOL_FILLERS: [&str; 4] = ["One moment.", "On it.", "One sec.", "Okay, give me a moment."];
+static FILLER_TURN: AtomicU64 = AtomicU64::new(0);
+
+fn tool_filler() -> &'static str {
+    TOOL_FILLERS[(FILLER_TURN.fetch_add(1, Ordering::Relaxed) % TOOL_FILLERS.len() as u64) as usize]
+}
 
 /// Installs the keyboard watcher and starts the session loop. Called once, from setup.
 pub fn start(app: &AppHandle) {
@@ -149,6 +155,8 @@ struct Listening {
     meter: JoinHandle<()>,
     /// The screen at the moment this session began, for the chat turn it becomes.
     screen: Option<JoinHandle<Option<Vec<u8>>>>,
+    /// What was on the computer at that moment (desk.rs): the app in front, the selection.
+    desk: Option<JoinHandle<Value>>,
     backend: Backend,
     purpose: Purpose,
     hands_free: bool,
@@ -332,6 +340,9 @@ fn discard(listening: Listening) {
     if let Some(screen) = listening.screen {
         screen.abort();
     }
+    if let Some(desk) = listening.desk {
+        desk.abort();
+    }
     if let Purpose::Answer(answer) = listening.purpose {
         let _ = answer.send(String::new());
     }
@@ -432,6 +443,12 @@ async fn screen_bytes(screen: Option<JoinHandle<Option<Vec<u8>>>>) -> Option<Vec
     }
 }
 
+/// Waits for the snapshot taken when listening began. It has had the whole of what was said to
+/// finish in, so this only ever waits on a computer that is struggling.
+async fn desk_snapshot(desk: Option<JoinHandle<Value>>) -> Option<Value> {
+    tokio::time::timeout(Duration::from_millis(400), desk?).await.ok()?.ok()
+}
+
 /// Opens the microphone for one thing said. `hands_free` listens until the speaker stops (or never
 /// starts); otherwise until the chord is let go.
 async fn listen(app: &AppHandle, speaker: &Speaker, generation: u64, purpose: Purpose, hands_free: bool) -> Option<Listening> {
@@ -449,6 +466,12 @@ async fn listen(app: &AppHandle, speaker: &Speaker, generation: u64, purpose: Pu
     let screen = matches!(purpose, Purpose::Chat { follow_up: false }).then(|| {
         let app = app.clone();
         tauri::async_runtime::spawn(async move { capture_screen(&app).await })
+    });
+    // Read now for the same reason, and on a follow-up too, which has no picture to go by: what is
+    // in front and what is selected are what "this" means.
+    let desk = matches!(purpose, Purpose::Chat { .. }).then(|| {
+        let prefs = prefs(app);
+        tauri::async_runtime::spawn(crate::desk::snapshot(prefs.share_selection, prefs.share_clipboard))
     });
 
     // Hands-free, the cue plays before the microphone opens, so the transcriber never hears it and
@@ -524,7 +547,7 @@ async fn listen(app: &AppHandle, speaker: &Speaker, generation: u64, purpose: Pu
         tokio::time::sleep(Duration::from_secs(VOICE_MAX_SECONDS)).await;
         send(Command::TimeUp(id));
     });
-    Some(Listening { id, generation, capture, transcribe, meter, screen, backend, purpose, hands_free })
+    Some(Listening { id, generation, capture, transcribe, meter, screen, desk, backend, purpose, hands_free })
 }
 
 /// Creates or moves the overlay windows (blocking work, so off the async threads).
@@ -535,7 +558,7 @@ async fn place_overlay(app: &AppHandle) {
 
 /// Listening is over: close the microphone, wait for the final words, and act on them.
 fn finish(app: &AppHandle, speaker: &Speaker, session: &mut Session, listening: Listening) {
-    let Listening { generation, capture, transcribe, meter, backend, purpose, screen, .. } = listening;
+    let Listening { generation, capture, transcribe, meter, backend, purpose, screen, desk, .. } = listening;
     meter.abort();
     latency::start();
     overlay::level(app, 0.0);
@@ -546,6 +569,9 @@ fn finish(app: &AppHandle, speaker: &Speaker, session: &mut Session, listening: 
         Purpose::Answer(answer) => {
             if let Some(screen) = screen {
                 screen.abort();
+            }
+            if let Some(desk) = desk {
+                desk.abort();
             }
             // The prompt that asked is waiting on this inside the reply task.
             update(app, generation, |view| view.status = Some("Got it…".to_string()));
@@ -579,7 +605,7 @@ fn finish(app: &AppHandle, speaker: &Speaker, session: &mut Session, listening: 
                         return fail(&app, &speaker, generation, "I didn't catch that. Please try again.".to_string());
                     }
                     if let Some(command) = local_command(&said) {
-                        return run_local_command(&app, &speaker, generation, command);
+                        return run_local_command(&app, &speaker, generation, command).await;
                     }
                     let conversation_id = match voice_conversation(&app) {
                         Ok(id) => id,
@@ -605,7 +631,8 @@ fn finish(app: &AppHandle, speaker: &Speaker, session: &mut Session, listening: 
                         None => Vec::new(),
                     };
                     latency::mark("screenshot_ready");
-                    match reply(&app, &speaker, generation, &backend, &conversation_id, &said, &attachment_ids, &finished).await {
+                    let desk = desk_snapshot(desk).await;
+                    match reply(&app, &speaker, generation, &backend, &conversation_id, &said, &attachment_ids, desk.as_ref(), &finished).await {
                         Ok(asked) => {
                             update(&app, generation, |view| {
                                 view.phase = Phase::Done;
@@ -630,10 +657,42 @@ fn finish(app: &AppHandle, speaker: &Speaker, session: &mut Session, listening: 
     }
 }
 
-/// "Say that again", "stop", "slower", "faster": answered here, never sent to Aloe.
-fn run_local_command(app: &AppHandle, speaker: &Speaker, generation: u64, command: LocalCommand) {
+/// "Say that again", "stop", "slower", "faster", and "pause", "next", "louder": answered here,
+/// never sent to Aloe.
+async fn run_local_command(app: &AppHandle, speaker: &Speaker, generation: u64, command: LocalCommand) {
     debug_log("voice", "local_command", format!("{command:?}"));
     match command {
+        LocalCommand::Media(media) => {
+            // No words: Aloe talking over the music it was asked to pause would be the wrong answer.
+            // The "got it" tone has already played; the label on the panel says what was done.
+            let done = match media {
+                MediaCommand::Pause => crate::media::set_playing(false).await,
+                MediaCommand::Play => crate::media::set_playing(true).await,
+                MediaCommand::Mute | MediaCommand::Unmute => {
+                    let muted = media == MediaCommand::Mute;
+                    match tauri::async_runtime::spawn_blocking(move || crate::desk::set_mute(muted)).await {
+                        Ok(Ok(())) => Ok(()),
+                        // Where the speakers can't be told outright, the mute key toggles them.
+                        _ => crate::media::press_media_key(&serde_json::json!({ "action": "mute" })).await.map(drop),
+                    }
+                }
+                other => crate::media::press_media_key(&serde_json::json!({ "action": other.key(), "repeat": other.presses() })).await.map(drop),
+            };
+            if let Err(error) = done {
+                return fail(app, speaker, generation, error);
+            }
+            update(app, generation, |view| {
+                view.phase = Phase::Done;
+                view.transcript = media.label().to_string();
+                view.status = None;
+            });
+            let app = app.clone();
+            tauri::async_runtime::spawn(async move {
+                tokio::time::sleep(Duration::from_millis(1_500)).await;
+                update(&app, generation, |view| *view = View::default());
+            });
+            return;
+        }
         LocalCommand::Repeat => {
             let sentences = LAST_REPLY.lock().unwrap_or_else(std::sync::PoisonError::into_inner).clone();
             if sentences.is_empty() {
@@ -715,9 +774,10 @@ impl Drop for PromptRoute {
 
 /// Streams Aloe's answer into the overlay and out of the speaker, stopping for prompts along the
 /// way. Returns once everything has been said, with whether the reply ended by asking something.
-async fn reply(app: &AppHandle, speaker: &Speaker, generation: u64, backend: &Backend, conversation_id: &str, message: &str, attachment_ids: &[String], finished: &Arc<AtomicBool>) -> Result<bool, String> {
+#[allow(clippy::too_many_arguments)]
+async fn reply(app: &AppHandle, speaker: &Speaker, generation: u64, backend: &Backend, conversation_id: &str, message: &str, attachment_ids: &[String], desk: Option<&Value>, finished: &Arc<AtomicBool>) -> Result<bool, String> {
     latency::mark("chat_sent");
-    let response = backend.chat(conversation_id, message, attachment_ids).await?;
+    let response = backend.chat(conversation_id, message, attachment_ids, desk).await?;
     latency::mark("chat_headers");
     let (_route, mut queued_commands) = PromptRoute::open(generation);
     LAST_REPLY.lock().unwrap_or_else(std::sync::PoisonError::into_inner).clear();
@@ -797,7 +857,7 @@ async fn reply(app: &AppHandle, speaker: &Speaker, generation: u64, backend: &Ba
                     if kind == "tool_start" && !spoke {
                         spoke = true;
                         // Not part of the reply, so "say that again" skips it.
-                        speaker.say(TOOL_FILLER);
+                        speaker.say(tool_filler());
                     }
                     update(app, generation, |view| {
                         view.reply.clear();

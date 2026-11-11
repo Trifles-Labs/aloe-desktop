@@ -895,6 +895,72 @@ fn guard_keyboard(window: Option<AloeWindow>) -> Result<(), ControlError> {
     Ok(())
 }
 
+// ── One-step jobs (quick_actions.rs) ─────────────────────────────────────────
+
+/// A one-step job that acts on the screen needs desktop control on, exactly as a `desktop_*` job
+/// does, and asks the user the same way when it is off.
+pub(crate) async fn require_control(app: &AppHandle) -> Result<(), String> {
+    if ensure_enabled_or_ask(app).await {
+        Ok(())
+    } else {
+        Err(DISABLED_MESSAGE.to_string())
+    }
+}
+
+fn control_message(error: ControlError) -> String {
+    match error {
+        ControlError::Failed(message) => message,
+        ControlError::Failsafe => FAILSAFE_MESSAGE.to_string(),
+    }
+}
+
+/// Types `text` into whatever has the keyboard, then presses Enter if asked. Refused while Aloe's
+/// own window has focus, like `desktop_type`. Returns how many characters went in.
+pub(crate) async fn quick_text(app: &AppHandle, text: String, enter: bool) -> Result<usize, String> {
+    let window = aloe_window(app);
+    let typed = on_input_thread(app, move || -> Result<usize, ControlError> {
+        let mut enigo = new_enigo()?;
+        let length = type_text(&mut enigo, window, &json!({ "text": text }))?.get("characters").and_then(Value::as_u64).unwrap_or(0) as usize;
+        if enter {
+            thread::sleep(Duration::from_millis(80));
+            enigo.key(Key::Return, Direction::Click).map_err(input_error)?;
+        }
+        Ok(length)
+    })
+    .await?;
+    typed.map_err(control_message)
+}
+
+/// Presses one key combination, such as "ctrl+v". `guarded` refuses it while Aloe's own window has
+/// focus; a combination the system itself takes ("win+d") has no need of that.
+pub(crate) async fn quick_keys(app: &AppHandle, combo: &'static str, guarded: bool) -> Result<(), String> {
+    let window = if guarded { aloe_window(app) } else { None };
+    let pressed = on_input_thread(app, move || -> Result<(), ControlError> {
+        let mut enigo = new_enigo()?;
+        press_keys(&mut enigo, window, &json!({ "keys": combo })).map(drop)
+    })
+    .await?;
+    pressed.map_err(control_message)
+}
+
+/// Saves the primary display as a PNG in the user's Pictures folder, without Aloe's own overlay in
+/// it, and says where. The folder and the name are chosen here, never by the job.
+pub(crate) async fn save_screenshot(app: &AppHandle) -> Result<Value, String> {
+    let (image, _) = {
+        let _hidden = crate::voice::overlay::own_capture(app).await;
+        tauri::async_runtime::spawn_blocking(grab_primary).await.map_err(|e| e.to_string())??
+    };
+    tauri::async_runtime::spawn_blocking(move || {
+        let folder = dirs::picture_dir().ok_or("Couldn't find the Pictures folder.")?.join("Screenshots");
+        std::fs::create_dir_all(&folder).map_err(|e| format!("Couldn't create {}: {e}", folder.display()))?;
+        let path = folder.join(format!("Aloe {}.png", chrono::Local::now().format("%Y-%m-%d %H.%M.%S")));
+        image.save(&path).map_err(|e| format!("Couldn't save the screenshot: {e}"))?;
+        Ok(json!({ "path": path.to_string_lossy(), "width": image.width(), "height": image.height() }))
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
 /// Switches desktop control off and takes the overlay down. Shared by the corner failsafe, the
 /// overlay's Stop button, and the settings toggle.
 pub fn disable_desktop_control(app: &AppHandle) {

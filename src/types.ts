@@ -52,6 +52,8 @@ export type VoicePrefs = {
   textSize: "s" | "m" | "l" | "xl";
   highContrast: boolean;
   linger: "short" | "long" | "until_dismissed";
+  shareSelection: boolean;
+  shareClipboard: boolean;
 };
 
 export const DEFAULT_VOICE_PREFS: VoicePrefs = {
@@ -64,6 +66,8 @@ export const DEFAULT_VOICE_PREFS: VoicePrefs = {
   textSize: "l",
   highContrast: false,
   linger: "long",
+  shareSelection: true,
+  shareClipboard: false,
 };
 
 export type PendingApproval = {

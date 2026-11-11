@@ -129,35 +129,116 @@ mod smtc {
         Win32::System::Com::{CoInitializeEx, COINIT_MULTITHREADED},
     };
 
-    fn spotify_session() -> Option<Session> {
+    fn manager() -> Option<Manager> {
         unsafe {
             let _ = CoInitializeEx(None, COINIT_MULTITHREADED);
         }
-        let manager = Manager::RequestAsync().ok()?.get().ok()?;
-        manager
+        Manager::RequestAsync().ok()?.get().ok()
+    }
+
+    fn spotify_session() -> Option<Session> {
+        manager()?
             .GetSessions()
             .ok()?
             .into_iter()
             .find(|s| s.SourceAppUserModelId().map(|id| id.to_string().to_lowercase().contains("spotify")).unwrap_or(false))
     }
 
-    pub fn read() -> Option<Playback> {
-        let session = spotify_session()?;
+    /// Whichever player Windows itself would send a media key to.
+    fn current_session() -> Option<Session> {
+        manager()?.GetCurrentSession().ok()
+    }
+
+    fn playing(session: &Session) -> Option<bool> {
+        Some(session.GetPlaybackInfo().ok()?.PlaybackStatus().ok()? == Status::Playing)
+    }
+
+    fn read_session(session: &Session) -> Option<Playback> {
         let props = session.TryGetMediaPropertiesAsync().ok()?.get().ok()?;
-        let playing = session.GetPlaybackInfo().ok()?.PlaybackStatus().ok()? == Status::Playing;
+        let playing = playing(session)?;
         let title = props.Title().ok()?.to_string();
         let artist = props.Artist().map(|a| a.to_string()).unwrap_or_default();
         (!title.is_empty()).then_some(Playback { title, artist, playing })
     }
 
+    pub fn read() -> Option<Playback> {
+        read_session(&spotify_session()?)
+    }
+
+    /// What is playing in any player, with the player's own id ("Spotify.exe", "Chrome").
+    pub fn read_current() -> Option<(String, Playback)> {
+        let session = current_session()?;
+        let app = session.SourceAppUserModelId().map(|id| id.to_string()).unwrap_or_default();
+        Some((app, read_session(&session)?))
+    }
+
     pub fn play() -> bool {
         spotify_session().and_then(|s| s.TryPlayAsync().ok()?.get().ok()).unwrap_or(false)
+    }
+
+    /// Plays or pauses the current player outright, where the media key would only toggle it.
+    /// `None` when no player is there to tell.
+    pub fn set_playing(play: bool) -> Option<bool> {
+        let session = current_session()?;
+        if playing(&session)? == play {
+            return Some(true);
+        }
+        let asked = if play { session.TryPlayAsync() } else { session.TryPauseAsync() };
+        asked.ok()?.get().ok()
     }
 }
 
 #[cfg(target_os = "windows")]
 async fn now_playing() -> Option<Playback> {
     tokio::task::spawn_blocking(smtc::read).await.ok().flatten()
+}
+
+/// A player's id as Windows reports it → a name to say: "Spotify.exe" → "Spotify",
+/// "SpotifyAB.SpotifyMusic_zpdnekdrzrea0!Spotify" → "Spotify", "308046B0AF4A39CB" (Firefox) → "Firefox".
+pub(crate) fn player_label(id: &str) -> String {
+    let lower = id.to_lowercase();
+    for (needle, name) in [
+        ("spotify", "Spotify"),
+        ("chrome", "Chrome"),
+        ("msedge", "Edge"),
+        ("firefox", "Firefox"),
+        ("308046b0af4a39cb", "Firefox"),
+        ("brave", "Brave"),
+        ("zunemusic", "Media Player"),
+        ("zunevideo", "Films & TV"),
+        ("vlc", "VLC"),
+        ("applemusic", "Apple Music"),
+        ("itunes", "iTunes"),
+    ] {
+        if lower.contains(needle) {
+            return name.to_string();
+        }
+    }
+    let app = id.split('!').next().unwrap_or(id);
+    let app = app.rsplit(['\\', '/']).next().unwrap_or(app);
+    app.strip_suffix(".exe").unwrap_or(app).to_string()
+}
+
+/// What is playing in any player right now, for the desk snapshot (desk.rs). Blocking.
+pub fn now_playing_blocking() -> Option<Value> {
+    #[cfg(target_os = "windows")]
+    {
+        let (app, now) = smtc::read_current()?;
+        return Some(json!({ "app": player_label(&app), "title": now.title, "artist": now.artist, "playing": now.playing }));
+    }
+    #[cfg(not(target_os = "windows"))]
+    None
+}
+
+/// Plays or pauses whatever player is current, for "pause" and "play" said out loud. Falls back to
+/// the play/pause key, which toggles, when this computer can't say what is playing.
+pub async fn set_playing(play: bool) -> Result<(), String> {
+    #[cfg(target_os = "windows")]
+    if tokio::task::spawn_blocking(move || smtc::set_playing(play)).await.ok().flatten() == Some(true) {
+        return Ok(());
+    }
+    let _ = play;
+    press_media_key(&json!({ "action": "play_pause" })).await.map(drop)
 }
 
 /// Opens the link, then watches Spotify until the new item is playing. Spotify plays some links and
@@ -258,6 +339,16 @@ mod tests {
             assert!(media_key_for(action).is_some(), "{action}");
         }
         assert!(media_key_for("enter").is_none());
+    }
+
+    #[test]
+    fn players_get_a_name_worth_saying() {
+        assert_eq!(player_label("Spotify.exe"), "Spotify");
+        assert_eq!(player_label("SpotifyAB.SpotifyMusic_zpdnekdrzrea0!Spotify"), "Spotify");
+        assert_eq!(player_label("Chrome"), "Chrome");
+        assert_eq!(player_label("308046B0AF4A39CB"), "Firefox");
+        assert_eq!(player_label(r"C:\Tools\foobar2000.exe"), "foobar2000");
+        assert_eq!(player_label("Some.App_abc!Main"), "Some.App_abc");
     }
 
     #[test]

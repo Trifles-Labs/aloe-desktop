@@ -307,6 +307,56 @@ pub enum LocalCommand {
     Quiet,
     Slower,
     Faster,
+    /// "Pause", "next", "louder": done on this computer at once, with no trip to Aloe.
+    Media(MediaCommand),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MediaCommand {
+    Pause,
+    Play,
+    Next,
+    Previous,
+    VolumeUp,
+    VolumeDown,
+    Mute,
+    Unmute,
+}
+
+impl MediaCommand {
+    /// The media key that does it (media.rs `press_media_key`).
+    pub fn key(self) -> &'static str {
+        match self {
+            MediaCommand::Pause | MediaCommand::Play => "play_pause",
+            MediaCommand::Next => "next",
+            MediaCommand::Previous => "previous",
+            MediaCommand::VolumeUp => "volume_up",
+            MediaCommand::VolumeDown => "volume_down",
+            MediaCommand::Mute | MediaCommand::Unmute => "mute",
+        }
+    }
+
+    /// A volume press is about 2%; five is a change you can hear.
+    pub fn presses(self) -> u64 {
+        match self {
+            MediaCommand::VolumeUp | MediaCommand::VolumeDown => 5,
+            _ => 1,
+        }
+    }
+
+    /// What the panel shows, in place of an answer.
+    pub fn label(self) -> &'static str {
+        match self {
+            MediaCommand::Pause => "Paused",
+            MediaCommand::Play => "Playing",
+            MediaCommand::Next => "Next",
+            MediaCommand::Previous => "Previous",
+            MediaCommand::VolumeUp => "Louder",
+            MediaCommand::VolumeDown => "Quieter",
+            MediaCommand::Mute => "Muted",
+            MediaCommand::Unmute => "Unmuted",
+        }
+    }
 }
 
 pub fn local_command(heard: &str) -> Option<LocalCommand> {
@@ -317,8 +367,25 @@ pub fn local_command(heard: &str) -> Option<LocalCommand> {
         "stop" | "stop talking" | "be quiet" | "quiet" | "shush" | "shut up" | "never mind" | "nevermind" => Some(LocalCommand::Quiet),
         "slower" | "speak slower" | "talk slower" | "slow down" | "speak more slowly" | "more slowly" => Some(LocalCommand::Slower),
         "faster" | "speak faster" | "talk faster" | "speed up" | "speak more quickly" | "more quickly" => Some(LocalCommand::Faster),
-        _ => None,
+        _ => media_command(said).map(LocalCommand::Media),
     }
+}
+
+/// The whole of what was said has to be one of these: "pause" is, "pause the download" is not, and
+/// goes to Aloe like anything else. "Stop" is not here either: it stops Aloe talking.
+fn media_command(said: &str) -> Option<MediaCommand> {
+    let said = said.trim_end_matches(" please").trim_end_matches(" for me");
+    Some(match said {
+        "pause" | "pause it" | "pause that" | "pause the music" | "pause the song" | "pause the video" | "pause music" | "stop the music" | "stop the song" => MediaCommand::Pause,
+        "play" | "resume" | "unpause" | "continue playing" | "resume the music" | "play the music" | "resume playing" | "keep playing" => MediaCommand::Play,
+        "next" | "skip" | "next song" | "next track" | "skip this" | "skip this song" | "skip this one" | "skip song" | "skip track" | "next one" | "play the next song" => MediaCommand::Next,
+        "previous" | "previous song" | "previous track" | "go back a song" | "last song" | "play the previous song" | "back a song" => MediaCommand::Previous,
+        "louder" | "volume up" | "turn it up" | "turn up the volume" | "turn the volume up" | "make it louder" | "a bit louder" => MediaCommand::VolumeUp,
+        "quieter" | "volume down" | "turn it down" | "turn down the volume" | "turn the volume down" | "make it quieter" | "a bit quieter" | "softer" => MediaCommand::VolumeDown,
+        "mute" | "mute it" | "mute that" | "mute the sound" | "mute the volume" => MediaCommand::Mute,
+        "unmute" | "unmute it" | "unmute the sound" | "sound on" => MediaCommand::Unmute,
+        _ => return None,
+    })
 }
 
 #[cfg(test)]
@@ -455,5 +522,38 @@ mod tests {
         assert_eq!(local_command("Speak faster"), Some(LocalCommand::Faster));
         assert_eq!(local_command("stop the music on Spotify"), None);
         assert_eq!(local_command("repeat my last email to Priya"), None);
+    }
+
+    #[test]
+    fn media_commands_run_here_only_when_they_are_the_whole_sentence() {
+        let media = |heard: &str| match local_command(heard) {
+            Some(LocalCommand::Media(command)) => Some(command),
+            _ => None,
+        };
+        assert_eq!(media("Pause."), Some(MediaCommand::Pause));
+        assert_eq!(media("Aloe, pause the music please"), Some(MediaCommand::Pause));
+        assert_eq!(media("Stop the music"), Some(MediaCommand::Pause));
+        assert_eq!(media("Resume"), Some(MediaCommand::Play));
+        assert_eq!(media("Next song!"), Some(MediaCommand::Next));
+        assert_eq!(media("skip this one"), Some(MediaCommand::Next));
+        assert_eq!(media("Previous track"), Some(MediaCommand::Previous));
+        assert_eq!(media("Turn it up"), Some(MediaCommand::VolumeUp));
+        assert_eq!(media("a bit quieter please"), Some(MediaCommand::VolumeDown));
+        assert_eq!(media("Mute"), Some(MediaCommand::Mute));
+        assert_eq!(media("Unmute"), Some(MediaCommand::Unmute));
+        // "Stop" alone still stops Aloe talking, and anything longer is a request for Aloe.
+        assert_eq!(local_command("Stop"), Some(LocalCommand::Quiet));
+        assert_eq!(media("pause the download in Chrome"), None);
+        assert_eq!(media("play Blinding Lights"), None);
+        assert_eq!(media("skip to the part about pricing"), None);
+        assert_eq!(media("turn the volume up to fifty"), None);
+        assert_eq!(media("next slide"), None);
+    }
+
+    #[test]
+    fn a_volume_command_presses_enough_to_hear() {
+        assert_eq!(MediaCommand::VolumeUp.presses(), 5);
+        assert_eq!(MediaCommand::Next.presses(), 1);
+        assert_eq!(MediaCommand::Pause.key(), "play_pause");
     }
 }
