@@ -98,6 +98,8 @@ static WATCHING: AtomicBool = AtomicBool::new(false);
 static ISLAND: Mutex<Option<Rect>> = Mutex::new(None);
 /// The drawing's clear chip, while there are marks on screen.
 static CHIP: Mutex<Option<Rect>> = Mutex::new(None);
+/// A 3D model among the marks, which takes the cursor so it can be turned, zoomed and clicked.
+static MODEL: Mutex<Option<Rect>> = Mutex::new(None);
 /// Cleared while Aloe itself clicks, so a synthetic click at the top of the screen reaches the
 /// app beneath rather than the island.
 static CLICKABLE: AtomicBool = AtomicBool::new(true);
@@ -148,6 +150,11 @@ pub fn set_chip(rect: Option<Rect>) {
     *CHIP.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = rect;
 }
 
+/// The page's 3D model moved, appeared or went (`None`).
+pub fn set_model(rect: Option<Rect>) {
+    *MODEL.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = rect;
+}
+
 /// Marks went up or all came down: keep the pointer watcher running for the chip while they show,
 /// and once neither they nor the island are up, hand every click back to the apps beneath.
 pub fn drawing_changed(app: &AppHandle, showing: bool) {
@@ -157,6 +164,7 @@ pub fn drawing_changed(app: &AppHandle, showing: bool) {
         }
     } else {
         set_chip(None);
+        set_model(None);
         if !is_showing() {
             release_pointer(app);
         }
@@ -234,8 +242,8 @@ pub fn spoken(app: &AppHandle, now: Option<(&str, f32)>) {
     }
 }
 
-/// Lets the stage take the cursor only while the pointer is over the island or the drawing's clear
-/// chip, until the overlay goes idle with nothing drawn. A thread of its own: reading the pointer waits on the event loop, so it must not run
+/// Lets the stage take the cursor only while the pointer is over the island, the drawing's clear
+/// chip or a 3D model, until the overlay goes idle with nothing drawn. A thread of its own: reading the pointer waits on the event loop, so it must not run
 /// on it or on the async workers.
 fn watch_pointer(app: AppHandle) {
     std::thread::spawn(move || {
@@ -243,12 +251,13 @@ fn watch_pointer(app: AppHandle) {
         while WATCHING.load(Ordering::SeqCst) {
             let island = *ISLAND.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
             let chip = *CHIP.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+            let model = *MODEL.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
             let over = match (app.cursor_position(), *STAGE.lock().unwrap_or_else(std::sync::PoisonError::into_inner)) {
                 (Ok(pointer), Some(stage)) => {
                     let x = (pointer.x - stage.x) / stage.scale;
                     let y = (pointer.y - stage.y) / stage.scale;
                     let inside = |r: Rect| x >= r.x && y >= r.y && x < r.x + r.width && y < r.y + r.height;
-                    island.is_some_and(inside) || chip.is_some_and(inside)
+                    island.is_some_and(inside) || chip.is_some_and(inside) || model.is_some_and(inside)
                 }
                 _ => false,
             };

@@ -267,8 +267,8 @@
       }
       @keyframes pen { 0% { offset-distance: 0%; opacity: 0; } 6% { opacity: 1; } 88% { opacity: 1; } 100% { offset-distance: 100%; opacity: 0; } }
       /* Marks fade out together, with the answer they belong to. */
-      .marks, .notes { transition: opacity 450ms var(--ease-out); }
-      #root:not([data-marks]) .marks, #root:not([data-marks]) .notes { opacity: 0; }
+      .marks, .notes, .model3d { transition: opacity 450ms var(--ease-out); }
+      #root:not([data-marks]) .marks, #root:not([data-marks]) .notes, #root:not([data-marks]) .model3d { opacity: 0; }
       /* Handwriting (src/voice-writing.ts): Markdown and KaTeX in a marker hand, each word and
          formula wiped on left to right in turn (--d after the mark's --delay, for --t). Letters
          and digits in formulas are in the hand too; the symbols stay typeset. */
@@ -324,6 +324,30 @@
       .note.small { font-size: 25px; }
       .note.large { font-size: 36px; }
       .note.fresh { clip-path: inset(-25% 100% -25% -8%); animation: write calc(380ms * var(--pace, 1)) linear var(--delay) forwards; }
+      /* A 3D solid over the screen (src/model3d.ts): a canvas in the mark's box, under the marks and
+         over the glow. It takes the cursor only once its renderer is up (voice/overlay.rs gives it
+         the window there), so a model that never appears never blocks a click. Its parts are named
+         in the same hand as the notes; a click on one shows its note. */
+      .model3d { position: fixed; left: 0; top: 0; pointer-events: none; }
+      .model3d canvas { display: block; width: 100%; height: 100%; pointer-events: none; }
+      .model3d-labels { position: absolute; inset: 0; pointer-events: none; }
+      .model3d-label {
+        --halo: rgb(10 11 14 / 0.92);
+        color: var(--accent); white-space: nowrap;
+        font: 600 26px/1.05 "Caveat", "Segoe Print", "Bradley Hand", cursive;
+        filter: drop-shadow(0 0 1px var(--halo)) drop-shadow(0 0 1px var(--halo)) drop-shadow(0 0 2.5px var(--halo)) drop-shadow(0 1px 5px rgb(0 0 0 / 0.35));
+      }
+      .model3d-note {
+        position: absolute; width: max-content; max-width: 240px;
+        display: grid; gap: 2px; padding: 7px 12px; border-radius: 12px;
+        background: var(--surface); color: var(--cream);
+        box-shadow: inset 0 0 0 1px rgb(var(--moss) / 0.3), 0 8px 24px rgb(0 0 0 / 0.4);
+        font: 500 calc(13px * var(--scale))/1.4 "Geist Variable", ui-sans-serif, system-ui, sans-serif;
+        opacity: 0; transition: opacity 180ms ease;
+      }
+      .model3d-note strong { font-weight: 600; color: rgb(var(--moss)); }
+      .model3d-note[data-open] { opacity: 1; }
+      [data-contrast="high"] .model3d-label { font: 700 18px/1.2 system-ui, sans-serif; }
       .clear-marks {
         position: fixed; left: 50%; bottom: 20px; transform: translate(-50%, 16px);
         display: flex; align-items: center; gap: 8px;

@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { markdownBlocks, write } from "./voice-writing";
+import { clearModels, modelRect, showModel, type Model3DMark } from "./model3d";
 
 /* Marks Aloe draws over the screen during a voice reply (voice/drawing.rs): highlights, boxes,
    circles, underlines, arrows, curves, polygons, ellipses, labels, notes and handwriting
@@ -13,7 +14,7 @@ import { markdownBlocks, write } from "./voice-writing";
 
 type Point = { x: number; y: number };
 type Mark = {
-  type: "highlight" | "box" | "circle" | "underline" | "ellipse" | "arrow" | "line" | "curve" | "polygon" | "label" | "text" | "write";
+  type: "highlight" | "box" | "circle" | "underline" | "ellipse" | "arrow" | "line" | "curve" | "polygon" | "label" | "text" | "write" | "model3d";
   x?: number;
   y?: number;
   w?: number;
@@ -29,7 +30,7 @@ type Mark = {
 type Drawing = { marks: Mark[]; freshFrom: number };
 type Rect = { x: number; y: number; width: number; height: number };
 
-const COLORS: Record<string, string> = {
+export const COLORS: Record<string, string> = {
   yellow: "#ffd400",
   green: "#30d158",
   red: "#ff453a",
@@ -53,7 +54,8 @@ const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
 
 let drawing: Drawing = { marks: [], freshFrom: 0 };
 
-const px = (p: Point) => ({ x: (p.x / 1000) * window.innerWidth, y: (p.y / 1000) * window.innerHeight });
+/** A point on the 0–1000 grid in CSS pixels (model3d.ts places its canvas with it too). */
+export const px = (p: Point) => ({ x: (p.x / 1000) * window.innerWidth, y: (p.y / 1000) * window.innerHeight });
 const colorOf = (mark: Mark) => COLORS[mark.color] ?? COLORS.red;
 const clamp = (n: number, low: number, high: number) => Math.min(high, Math.max(low, n));
 
@@ -277,6 +279,23 @@ const placeChip = () => {
   reportChip({ x: box.x, y: box.y, width: box.width, height: box.height });
 };
 
+/* ---- A 3D model's box, so it can be turned and clicked; the same way ---- */
+let reportedModel = "";
+const reportModel = (rect: Rect | null) => {
+  const key = rect ? `${Math.round(rect.x)},${Math.round(rect.y)},${Math.round(rect.width)},${Math.round(rect.height)}` : "";
+  if (key === reportedModel) return;
+  reportedModel = key;
+  void invoke("voice_overlay_model", { rect }).catch(() => undefined);
+};
+
+/* The last model among the marks is shown (one at a time); none, and any up is taken away. */
+const placeModel = (models: Mark[]) => {
+  const last = models[models.length - 1];
+  if (last) showModel(last as unknown as Model3DMark);
+  else clearModels();
+  reportModel(modelRect());
+};
+
 type Area = { left: number; right: number; top: number; bottom: number };
 /** Space kept between a moved piece of handwriting and the words above it. */
 const WRITE_GAP = 8;
@@ -339,6 +358,7 @@ const render = (next: Drawing, animate: boolean) => {
     // Fade out what is there (CSS, off data-marks), then take it away.
     root.removeAttribute("data-marks");
     reportChip(null);
+    placeModel([]);
     const empty = () => {
       layer.replaceChildren();
       notes.replaceChildren();
@@ -353,6 +373,8 @@ const render = (next: Drawing, animate: boolean) => {
   layer.setAttribute("viewBox", `0 0 ${window.innerWidth} ${window.innerHeight}`);
   const fresh: { pieces: SVGElement[]; note?: HTMLElement; writes?: number }[] = [];
   next.marks.forEach((mark, index) => {
+    // A model is a canvas of its own (model3d.ts), placed with the words below, not SVG pieces.
+    if (mark.type === "model3d") return;
     const built = build(mark);
     const isFresh = animate && index >= next.freshFrom && !reducedMotion.matches;
     // Leader lines go under every pill, so a pill is never crossed out by another mark's line.
@@ -404,6 +426,7 @@ const render = (next: Drawing, animate: boolean) => {
       if (writing) taken.push(area(box, dx, dy));
     }
     placeChip();
+    placeModel(next.marks.filter((mark) => mark.type === "model3d"));
   });
 };
 

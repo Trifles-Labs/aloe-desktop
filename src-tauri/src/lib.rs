@@ -433,6 +433,12 @@ fn voice_overlay_chip(rect: Option<voice::overlay::Rect>) {
     voice::overlay::set_chip(rect);
 }
 
+/// Where a 3D model drawn over the screen is, so it can be rotated, zoomed and clicked.
+#[tauri::command]
+fn voice_overlay_model(rect: Option<voice::overlay::Rect>) {
+    voice::overlay::set_model(rect);
+}
+
 /// The clear chip: takes away every mark Aloe drew over the screen.
 #[tauri::command]
 fn voice_clear_drawing(app: tauri::AppHandle) {
@@ -806,6 +812,7 @@ pub fn run() {
             voice_overlay_state,
             voice_overlay_island,
             voice_overlay_chip,
+            voice_overlay_model,
             voice_clear_drawing,
             voice_overlay_drawing,
             voice_hotkey_allowed,
