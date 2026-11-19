@@ -105,8 +105,10 @@ jobs:
           # Push-to-talk voice: cpal's microphone and speaker (ALSA).
           sudo apt-get install -y libasound2-dev
 
+      # Rust 1.100+ breaks xcap 0.0.12 (type-inference change, rust-lang/rust#148922), so the toolchain
+      # is pinned to the last version that built v1.5.8. Lift the pin once xcap is bumped.
       - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@1.99.1
         with:
           targets: ${{ matrix.platform == 'macos-latest' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
 
